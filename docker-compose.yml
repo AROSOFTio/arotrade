@@ -26,7 +26,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: arotrade-redis
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
+    command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
     healthcheck:
@@ -52,7 +52,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-arotrade}
       POSTGRES_USER: ${POSTGRES_USER:-arotrade}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
-      REDIS_URL: redis://:${REDIS_PASSWORD:-}@redis:6379/0
+      REDIS_URL: redis://redis:6379/0
       JWT_SECRET: ${JWT_SECRET:-change_me}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-change_me_32_char_key}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
@@ -99,7 +99,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-arotrade}
       POSTGRES_USER: ${POSTGRES_USER:-arotrade}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
-      REDIS_URL: redis://:${REDIS_PASSWORD:-}@redis:6379/0
+      REDIS_URL: redis://redis:6379/0
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
     depends_on:
