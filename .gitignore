@@ -1,0 +1,115 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+venv/
+ENV/
+env/
+.venv
+
+# Node
+node_modules/
+.npm
+.eslintcache
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+coverage/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.iml
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# Docker
+docker-compose.override.yml
+.dockerignore
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Secrets (explicit prevention)
+*.key
+*.pem
+*.crt
+secrets.json
+credentials.json
+.ssh/
+
+# Temporary
+*.tmp
+*.temp
+tmp/
+temp/
+
+# IDE Generated
+.classpath
+.project
+.pydevproject
+.settings/
+*.sublime-project
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Media uploads
+uploads/
+static/uploads/
+
+# Backups
+*.bak
+*.backup

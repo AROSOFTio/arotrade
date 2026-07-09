@@ -1,0 +1,49 @@
+# Caddy reverse proxy configuration for AroTrade AI
+
+{$DOMAIN:localhost} {
+    # Encode response
+    encode gzip
+
+    # Frontend
+    route /admin* {
+        reverse_proxy {$WEB_BACKEND:web:3000}
+    }
+
+    route /dashboard* {
+        reverse_proxy {$WEB_BACKEND:web:3000}
+    }
+
+    route /login* {
+        reverse_proxy {$WEB_BACKEND:web:3000}
+    }
+
+    route /register* {
+        reverse_proxy {$WEB_BACKEND:web:3000}
+    }
+
+    # API
+    route /api* {
+        reverse_proxy {$API_BACKEND:api:8000}
+    }
+
+    # Static files
+    route /* {
+        reverse_proxy {$WEB_BACKEND:web:3000}
+    }
+
+    # Security headers
+    header / {
+        # HSTS
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        # X-Content-Type-Options
+        X-Content-Type-Options "nosniff"
+        # X-Frame-Options
+        X-Frame-Options "SAMEORIGIN"
+        # X-XSS-Protection
+        X-XSS-Protection "1; mode=block"
+        # Referrer-Policy
+        Referrer-Policy "strict-origin-when-cross-origin"
+        # Permissions-Policy
+        Permissions-Policy "geolocation=(), microphone=(), camera=()"
+    }
+}
