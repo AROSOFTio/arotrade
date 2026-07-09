@@ -61,8 +61,8 @@ services:
       DERIV_API_TOKEN_DEMO: ${DERIV_API_TOKEN_DEMO:-}
       ENABLE_LIVE_TRADING: ${ENABLE_LIVE_TRADING:-false}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -128,8 +128,8 @@ services:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api}
       NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-AroTrade AI}
       NEXT_PUBLIC_BRAND_COLOR: ${NEXT_PUBLIC_BRAND_COLOR:-#155DFC}
-    ports:
-      - "3000:3000"
+    expose:
+      - "3000"
     depends_on:
       - api
     restart: unless-stopped
