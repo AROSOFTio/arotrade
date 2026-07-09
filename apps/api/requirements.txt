@@ -24,7 +24,13 @@ httpx==0.25.2
 requests==2.31.0
 
 # AI Providers
-google-generativeai>=0.8.3
+# Pin protobuf directly: google-ai-generativelanguage (pulled in by
+# google-generativeai) requires protobuf<6.0.0, which conflicts with newer
+# grpcio-status releases that require protobuf>=7. Fixing protobuf up front
+# removes that axis from resolution so pip doesn't backtrack through dozens
+# of grpcio-status candidates.
+protobuf==5.29.5
+google-generativeai==0.8.5
 # openai==1.3.10  # Future
 # groq==0.4.1  # Future
 # anthropic==0.7.10  # Future
