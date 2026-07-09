@@ -1,13 +1,15 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  swcMinify: true,
   images: {
-    domains: ['localhost', 'arotrade.aroftlabs.com'],
     remotePatterns: [
       {
         protocol: 'https',
         hostname: '**.arosoftlabs.com',
+      },
+      {
+        protocol: 'https',
+        hostname: 'arotrade.aroftlabs.com',
       },
     ],
   },

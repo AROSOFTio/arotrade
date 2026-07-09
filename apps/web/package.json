@@ -11,27 +11,27 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "next": "latest",
-    "react": "latest",
-    "react-dom": "latest",
-    "typescript": "latest",
-    "@types/react": "latest",
-    "@types/react-dom": "latest",
-    "tailwindcss": "latest",
-    "postcss": "latest",
-    "autoprefixer": "latest",
-    "axios": "latest",
-    "react-hook-form": "latest",
-    "zod": "latest",
-    "@hookform/resolvers": "latest",
-    "recharts": "latest",
-    "clsx": "latest",
-    "date-fns": "latest"
+    "next": "^15.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.4.5",
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.0",
+    "tailwindcss": "^3.4.10",
+    "postcss": "^8.4.41",
+    "autoprefixer": "^10.4.19",
+    "axios": "^1.7.2",
+    "react-hook-form": "^7.52.0",
+    "zod": "^3.23.8",
+    "@hookform/resolvers": "^3.9.0",
+    "recharts": "^2.12.7",
+    "clsx": "^2.1.1",
+    "date-fns": "^3.6.0"
   },
   "devDependencies": {
-    "@types/node": "latest",
-    "eslint": "latest",
-    "eslint-config-next": "latest",
-    "prettier": "latest"
+    "@types/node": "^20.14.9",
+    "eslint": "^8.57.0",
+    "eslint-config-next": "^15.1.0",
+    "prettier": "^3.3.2"
   }
 }
