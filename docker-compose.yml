@@ -12,7 +12,6 @@ services:
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./infra/scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-arotrade} -d ${POSTGRES_DB:-arotrade}"]
       interval: 10s
@@ -68,9 +67,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    volumes:
-      - ./apps/api:/app
-      - /app/__pycache__
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s
@@ -82,7 +78,7 @@ services:
     command: >
       sh -c "
       alembic upgrade head &&
-      uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      uvicorn app.main:app --host 0.0.0.0 --port 8000
       "
 
   # Celery Worker (Background Tasks)
@@ -106,9 +102,6 @@ services:
       - postgres
       - redis
       - api
-    volumes:
-      - ./apps/api:/app
-      - /app/__pycache__
     restart: unless-stopped
     networks:
       - arotrade

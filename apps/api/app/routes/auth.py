@@ -50,11 +50,12 @@ async def register(user_data: schemas.UserRegister, db: Session = Depends(get_db
     refresh_token = create_refresh_token({"sub": str(user.id)})
 
     # Store session
+    from datetime import datetime
     session = models.UserSession(
         user_id=user.id,
         token=access_token,
         refresh_token=refresh_token,
-        expires_at=verify_token(access_token)["exp"]
+        expires_at=datetime.utcfromtimestamp(verify_token(access_token)["exp"])
     )
     db.add(session)
     db.commit()
