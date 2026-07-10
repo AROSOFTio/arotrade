@@ -106,6 +106,8 @@ services:
     networks:
       - arotrade
     command: celery -A app.workers.celery_app worker -l info
+    healthcheck:
+      disable: true
 
   # Next.js Frontend
   web:
