@@ -105,7 +105,7 @@ services:
     restart: unless-stopped
     networks:
       - arotrade
-    command: celery -A app.workers worker -l info
+    command: celery -A app.workers.celery_app worker -l info
 
   # Next.js Frontend
   web:

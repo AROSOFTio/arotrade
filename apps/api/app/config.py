@@ -30,7 +30,10 @@ class Settings(BaseSettings):
     ENCRYPTION_KEY: str = "change_me_32_char_encryption_key"
 
     # CORS
-    ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "https://arotrade.aroftlabs.com"]
+    # Comma-separated list of origins. Kept as a plain str field (rather than
+    # List[str]) because pydantic-settings tries to JSON-decode env vars for
+    # complex-typed fields, which fails for a bare URL or comma-separated list.
+    ALLOWED_ORIGINS: str = "http://localhost:3000,https://arotrade.aroftlabs.com"
     CORS_CREDENTIALS: bool = True
 
     # Security
@@ -74,6 +77,10 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
+
+    @property
+    def allowed_origins_list(self) -> List[str]:
+        return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
 
 
 # Create settings instance
