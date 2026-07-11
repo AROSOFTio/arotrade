@@ -18,8 +18,6 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
-    networks:
-      - arotrade
 
   # Redis Cache & Task Queue
   redis:
@@ -34,8 +32,6 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
-    networks:
-      - arotrade
 
   # FastAPI Backend
   api:
@@ -73,8 +69,6 @@ services:
       timeout: 10s
       retries: 3
     restart: unless-stopped
-    networks:
-      - arotrade
     command: >
       sh -c "
       alembic upgrade head &&
@@ -103,8 +97,6 @@ services:
       - redis
       - api
     restart: unless-stopped
-    networks:
-      - arotrade
     command: celery -A app.workers.celery_app worker -l info
     healthcheck:
       disable: true
@@ -128,8 +120,6 @@ services:
     depends_on:
       - api
     restart: unless-stopped
-    networks:
-      - arotrade
 
 volumes:
   postgres_data:
@@ -137,6 +127,3 @@ volumes:
   redis_data:
     driver: local
 
-networks:
-  arotrade:
-    driver: bridge
