@@ -72,6 +72,7 @@ class User(Base):
     trades = relationship("Trade", back_populates="user", cascade="all, delete-orphan")
     journal_entries = relationship("JournalEntry", back_populates="user", cascade="all, delete-orphan")
     audit_logs = relationship("AuditLog", back_populates="user", cascade="all, delete-orphan")
+    execution_audits = relationship("ExecutionAudit", back_populates="user", cascade="all, delete-orphan")
 
 
 class UserSession(Base):
@@ -204,6 +205,7 @@ class Signal(Base):
     approved_at = Column(DateTime, nullable=True)
     executed_at = Column(DateTime, nullable=True)
     expired_at = Column(DateTime, nullable=True)
+    valid_until = Column(DateTime, nullable=True)
 
     user = relationship("User", back_populates="signals")
 
@@ -302,12 +304,39 @@ class Trade(Base):
     status = Column(Enum(TradeStatus), default=TradeStatus.PENDING)
     mode = Column(Enum(TradingMode), default=TradingMode.DEMO)
 
+    # A trade is only considered open after a broker or the explicit paper engine fills it.
+    broker = Column(String(50), nullable=True)
+    broker_order_id = Column(String(255), unique=True, nullable=True)
+    client_order_id = Column(String(255), unique=True, nullable=True)
+    execution_status = Column(String(30), nullable=False, default="queued", server_default="queued")
+    execution_error = Column(Text, nullable=True)
+    submitted_at = Column(DateTime, nullable=True)
+    filled_at = Column(DateTime, nullable=True)
+
     notes = Column(Text, nullable=True)
 
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     user = relationship("User", back_populates="trades")
+
+
+class ExecutionAudit(Base):
+    __tablename__ = "execution_audits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    signal_id = Column(Integer, ForeignKey("signals.id"), nullable=True)
+    trade_id = Column(Integer, ForeignKey("trades.id"), nullable=True)
+
+    broker = Column(String(50), nullable=False)
+    mode = Column(String(10), nullable=False)
+    outcome = Column(String(30), nullable=False)
+    reason = Column(Text, nullable=True)
+    details = Column(JSON, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    user = relationship("User", back_populates="execution_audits")
 
 
 class JournalEntry(Base):

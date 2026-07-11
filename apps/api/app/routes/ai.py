@@ -21,41 +21,10 @@ async def analyze_chart(
             detail="AI service not configured"
         )
 
-    # Create AI analysis record
-    analysis = models.AIAnalysis(
-        user_id=current_user["user_id"],
-        symbol=request.symbol,
-        timeframe=request.timeframe,
-        image_url=request.image_url,
-        prompt=request.prompt
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Gemini chart analysis is not connected yet. No generated analysis can be used as a trading signal."
     )
-
-    # TODO: Call Gemini API to analyze
-    # For now, return mock analysis
-    analysis.bias = "bullish"
-    analysis.signal = "buy"
-    analysis.confidence = 68
-    analysis.entry_min = 2345.2
-    analysis.entry_max = 2348.1
-    analysis.stop_loss = 2338.5
-    analysis.take_profit_1 = 2355.0
-    analysis.take_profit_2 = 2364.0
-    analysis.take_profit_3 = 2372.0
-    analysis.risk_reward = 2.3
-    analysis.reasoning = [
-        "Market structure is bullish",
-        "Price reacted from demand zone",
-        "RSI momentum supports continuation"
-    ]
-    analysis.invalidation = "Signal becomes invalid below 2338.5"
-    analysis.news_warning = "Check high-impact USD news before execution"
-    analysis.risk_warning = "Use maximum 1% account risk"
-
-    db.add(analysis)
-    db.commit()
-    db.refresh(analysis)
-
-    return analysis
 
 
 @router.post("/analyze-image")

@@ -9,7 +9,7 @@ const nextConfig = {
       },
       {
         protocol: 'https',
-        hostname: 'arotrade.aroftlabs.com',
+        hostname: 'arotrader.arosoftlabs.com',
       },
     ],
   },

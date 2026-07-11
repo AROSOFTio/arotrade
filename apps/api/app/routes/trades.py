@@ -14,53 +14,17 @@ async def execute_trade(
     current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Execute a trade (demo or live based on user settings)."""
+    """Reject direct execution until the signal-to-broker path is configured."""
     # Get user
     user = db.query(models.User).filter(models.User.id == current_user["user_id"]).first()
 
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    # Risk checks
-    if user.trading_mode == models.TradingMode.LIVE:
-        if not user.enable_live_trading:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Live trading not enabled for this user"
-            )
-        if not settings.ENABLE_LIVE_TRADING:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Live trading is disabled globally"
-            )
-
-    # Validate stop loss exists
-    if not trade_data.stop_loss:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Stop loss is required"
-        )
-
-    # Create trade record
-    trade = models.Trade(
-        user_id=current_user["user_id"],
-        symbol=trade_data.symbol,
-        trade_type=trade_data.trade_type,
-        entry_price=trade_data.entry_price,
-        entry_time=datetime.utcnow(),
-        stop_loss=trade_data.stop_loss,
-        take_profit=trade_data.take_profit,
-        volume=trade_data.volume,
-        notes=trade_data.notes,
-        status=models.TradeStatus.OPEN,
-        mode=user.trading_mode
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Direct execution is disabled. Use an approved signal and the paper execution endpoint. No live broker adapter is configured."
     )
-
-    db.add(trade)
-    db.commit()
-    db.refresh(trade)
-
-    return trade
 
 
 @router.get("", response_model=list[schemas.TradeResponse])

@@ -7,9 +7,9 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        primary: '#155DFC',
-        dark: '#020617',
-        card: '#0F172A',
+        primary: '#2563EB',
+        brand: '#2563EB',
+        'brand-dark': '#1D4ED8',
       },
     },
   },

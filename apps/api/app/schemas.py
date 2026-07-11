@@ -1,5 +1,5 @@
-from pydantic import BaseModel, EmailStr, Field
-from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, EmailStr, Field, model_validator
+from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
 from enum import Enum
 
@@ -30,6 +30,36 @@ class UserResponse(BaseModel):
     role: str
     trading_mode: str
     enable_live_trading: bool
+    default_risk_percent: float
+    max_daily_loss_percent: float
+    max_open_trades: int
+    is_active: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class UserSettingsUpdate(BaseModel):
+    default_risk_percent: Optional[float] = Field(default=None, gt=0, le=5)
+    max_daily_loss_percent: Optional[float] = Field(default=None, gt=0, le=25)
+    max_open_trades: Optional[int] = Field(default=None, ge=1, le=20)
+
+
+class BrokerAccountCreate(BaseModel):
+    broker: str = Field(min_length=2, max_length=50)
+    account_id: str = Field(min_length=2, max_length=255)
+    balance: float = Field(default=0, ge=0)
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+
+
+class BrokerAccountResponse(BaseModel):
+    id: int
+    broker: str
+    account_id: str
+    account_type: str
+    balance: float
+    currency: str
     is_active: bool
     created_at: datetime
 
@@ -73,16 +103,35 @@ class AIAnalysisResponse(BaseModel):
 class SignalCreate(BaseModel):
     symbol: str
     timeframe: str
-    signal_type: str  # buy, sell
-    entry_min: float
-    entry_max: float
-    stop_loss: float
+    signal_type: Literal["buy", "sell"]
+    entry_min: float = Field(gt=0)
+    entry_max: float = Field(gt=0)
+    stop_loss: float = Field(gt=0)
     take_profit_1: Optional[float] = None
     take_profit_2: Optional[float] = None
     take_profit_3: Optional[float] = None
-    risk_reward: Optional[float] = None
-    confidence: int = 50
+    risk_reward: Optional[float] = Field(default=None, gt=0)
+    confidence: int = Field(default=50, ge=0, le=100)
     notes: Optional[str] = None
+    valid_until: Optional[datetime] = None
+
+    @model_validator(mode="after")
+    def validate_price_structure(self):
+        if self.entry_min > self.entry_max:
+            raise ValueError("entry_min must be less than or equal to entry_max")
+
+        if self.signal_type == "buy":
+            if self.stop_loss >= self.entry_min:
+                raise ValueError("Buy signals require a stop loss below the entry range")
+            if self.take_profit_1 is not None and self.take_profit_1 <= self.entry_max:
+                raise ValueError("Buy signals require take profit above the entry range")
+        else:
+            if self.stop_loss <= self.entry_max:
+                raise ValueError("Sell signals require a stop loss above the entry range")
+            if self.take_profit_1 is not None and self.take_profit_1 >= self.entry_min:
+                raise ValueError("Sell signals require take profit below the entry range")
+
+        return self
 
 
 class SignalResponse(BaseModel):
@@ -100,9 +149,27 @@ class SignalResponse(BaseModel):
     confidence: int
     status: str
     created_at: datetime
+    approved_at: Optional[datetime]
+    executed_at: Optional[datetime]
+    valid_until: Optional[datetime]
 
     class Config:
         from_attributes = True
+
+
+class SignalEvaluationRequest(BaseModel):
+    observed_price: float = Field(gt=0)
+
+
+class SignalEvaluationResponse(BaseModel):
+    eligible: bool
+    reasons: List[str]
+    calculated_risk_reward: Optional[float]
+
+
+class SignalPaperExecutionRequest(SignalEvaluationRequest):
+    volume: float = Field(gt=0)
+    notes: Optional[str] = None
 
 
 # Strategy Schemas
@@ -187,6 +254,13 @@ class TradeResponse(BaseModel):
     profit_loss: Optional[float]
     status: str
     mode: str
+    broker: Optional[str] = None
+    broker_order_id: Optional[str] = None
+    client_order_id: Optional[str] = None
+    execution_status: Optional[str] = None
+    execution_error: Optional[str] = None
+    submitted_at: Optional[datetime] = None
+    filled_at: Optional[datetime] = None
     created_at: datetime
 
     class Config:

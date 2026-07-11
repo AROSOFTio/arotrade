@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     # App
     APP_NAME: str = "AroTrade AI"
     APP_ENV: str = "production"
-    APP_URL: str = "https://arotrade.aroftlabs.com"
+    APP_URL: str = "https://arotrader.arosoftlabs.com"
     DEBUG: bool = False
 
     # Database
@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     # Comma-separated list of origins. Kept as a plain str field (rather than
     # List[str]) because pydantic-settings tries to JSON-decode env vars for
     # complex-typed fields, which fails for a bare URL or comma-separated list.
-    ALLOWED_ORIGINS: str = "http://localhost:3000,https://arotrade.aroftlabs.com"
+    ALLOWED_ORIGINS: str = "http://localhost:3000,https://arotrader.arosoftlabs.com"
     CORS_CREDENTIALS: bool = True
 
     # Security
@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     DERIV_API_TOKEN_DEMO: str = ""
     DERIV_API_TOKEN_LIVE: str = ""
     ENABLE_LIVE_TRADING: bool = False
+    PAPER_TRADING_ENABLED: bool = True
+    MIN_SIGNAL_CONFIDENCE: int = 70
+    MIN_SIGNAL_RISK_REWARD: float = 1.5
 
     # Risk Parameters
     DEFAULT_RISK_PER_TRADE: float = 1.0

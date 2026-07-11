@@ -1,11 +1,11 @@
 # AroTrade AI - API Documentation
 
-**Base URL:** `https://arotrade.aroftlabs.com/api`
+**Base URL:** `https://arotrader.arosoftlabs.com/api`
 
 **Authentication:** Bearer JWT token in `Authorization` header
 
 ```bash
-curl -H "Authorization: Bearer YOUR_JWT_TOKEN" https://arotrade.aroftlabs.com/api/health
+curl -H "Authorization: Bearer YOUR_JWT_TOKEN" https://arotrader.arosoftlabs.com/api/health
 ```
 
 ---
@@ -752,7 +752,7 @@ GET /api/signals?skip=0&limit=50
 **Allowed Origins:** Configured in environment variables
 
 ```env
-ALLOWED_ORIGINS=https://arotrade.aroftlabs.com,http://localhost:3000
+ALLOWED_ORIGINS=https://arotrader.arosoftlabs.com,http://localhost:3000
 ```
 
 ---

@@ -145,6 +145,28 @@ async def get_current_user_info(
     return user
 
 
+@router.patch("/me/settings", response_model=schemas.UserResponse)
+async def update_current_user_settings(
+    settings_data: schemas.UserSettingsUpdate,
+    current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Update non-execution risk preferences for the signed-in user."""
+    user = db.query(models.User).filter(
+        models.User.id == current_user["user_id"]
+    ).first()
+
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    for field_name, value in settings_data.model_dump(exclude_none=True).items():
+        setattr(user, field_name, value)
+
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 @router.post("/logout")
 async def logout(current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user)):
     """Logout user."""

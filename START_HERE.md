@@ -138,15 +138,15 @@ See: **QUICKSTART.md** for full steps
 ### Step 4: Verify Deployment (2 minutes)
 
 ```bash
-curl https://arotrade.aroftlabs.com/api/health
+curl https://arotrader.arosoftlabs.com/api/health
 # Should return: {"status":"healthy",...}
 ```
 
 Open browser:
-- **Landing:** https://arotrade.aroftlabs.com
-- **Login:** https://arotrade.aroftlabs.com/login
-- **Dashboard:** https://arotrade.aroftlabs.com/dashboard
-- **Admin:** https://arotrade.aroftlabs.com/admin
+- **Landing:** https://arotrader.arosoftlabs.com
+- **Login:** https://arotrader.arosoftlabs.com/login
+- **Dashboard:** https://arotrader.arosoftlabs.com/dashboard
+- **Admin:** https://arotrader.arosoftlabs.com/admin
 
 ### Step 5: Test Features (10 minutes)
 

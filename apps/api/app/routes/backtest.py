@@ -25,34 +25,10 @@ async def run_backtest(
             detail="Strategy not found"
         )
 
-    # Create backtest record
-    backtest = models.Backtest(
-        user_id=current_user["user_id"],
-        strategy_id=backtest_data.strategy_id,
-        symbol=backtest_data.symbol,
-        timeframe=backtest_data.timeframe,
-        start_date=backtest_data.start_date,
-        end_date=backtest_data.end_date,
-        initial_balance=backtest_data.initial_balance,
-        # TODO: Run actual backtest logic
-        total_trades=100,
-        winning_trades=65,
-        losing_trades=35,
-        win_rate=65.0,
-        total_profit=1500.0,
-        profit_factor=2.3,
-        max_drawdown=10.5,
-        average_win=50.0,
-        average_loss=20.0,
-        risk_reward_ratio=2.5,
-        is_safe=True
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Backtesting needs verified historical candle data and executable strategy rules. No results are generated until those are connected."
     )
-
-    db.add(backtest)
-    db.commit()
-    db.refresh(backtest)
-
-    return backtest
 
 
 @router.get("/{backtest_id}", response_model=schemas.BacktestResponse)

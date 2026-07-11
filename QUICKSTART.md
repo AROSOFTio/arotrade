@@ -7,7 +7,7 @@ Welcome to AroTrade AI! This guide will get you from zero to a running trading p
 ## 📋 Prerequisites
 
 - **VPS Access:** SSH to `95.111.234.34` with password `BenTech$$$@@@5428`
-- **Domain:** `arotrade.aroftlabs.com` pointing to `95.111.234.34`
+- **Domain:** `arotrader.arosoftlabs.com` pointing to `95.111.234.34`
 - **API Keys:**
   - Gemini API key (for AI analysis)
   - (Optional) Deriv API credentials for live trading
@@ -66,8 +66,8 @@ ENCRYPTION_KEY=<generate-random-32-char-string>
 GEMINI_API_KEY=<your-gemini-api-key>
 
 # Domain
-APP_URL=https://arotrade.aroftlabs.com
-ALLOWED_ORIGINS=https://arotrade.aroftlabs.com
+APP_URL=https://arotrader.arosoftlabs.com
+ALLOWED_ORIGINS=https://arotrader.arosoftlabs.com
 ```
 
 **To generate random strings:**
@@ -131,27 +131,27 @@ Confirm password: AdminSecurePass123!
 
 ```bash
 # API health
-curl https://arotrade.aroftlabs.com/api/health
+curl https://arotrader.arosoftlabs.com/api/health
 
 # Should return:
 # {"status":"healthy","version":"1.0.0",...}
 
 # AI service health
-curl https://arotrade.aroftlabs.com/api/ai/health
+curl https://arotrader.arosoftlabs.com/api/ai/health
 
 # Execution engine health
-curl https://arotrade.aroftlabs.com/api/execution/health
+curl https://arotrader.arosoftlabs.com/api/execution/health
 ```
 
 ### Access the Platform
 
 Open in browser:
 
-1. **Landing Page:** https://arotrade.aroftlabs.com
-2. **Register:** https://arotrade.aroftlabs.com/register
-3. **Login:** https://arotrade.aroftlabs.com/login
-4. **Dashboard:** https://arotrade.aroftlabs.com/dashboard
-5. **Admin Panel:** https://arotrade.aroftlabs.com/admin
+1. **Landing Page:** https://arotrader.arosoftlabs.com
+2. **Register:** https://arotrader.arosoftlabs.com/register
+3. **Login:** https://arotrader.arosoftlabs.com/login
+4. **Dashboard:** https://arotrader.arosoftlabs.com/dashboard
+5. **Admin Panel:** https://arotrader.arosoftlabs.com/admin
 
 Log in with admin credentials you created above.
 
@@ -316,7 +316,7 @@ docker compose restart api
 docker compose logs caddy
 
 # Verify domain DNS
-dig arotrade.aroftlabs.com
+dig arotrader.arosoftlabs.com
 
 # Force certificate renewal
 docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile

@@ -46,9 +46,9 @@ async def execution_health():
     deriv_available = bool(settings.DERIV_APP_ID)
 
     return {
-        "status": "operational",
-        "demo_trading": True,
-        "live_trading": settings.ENABLE_LIVE_TRADING,
+        "status": "paper_ready" if settings.PAPER_TRADING_ENABLED else "disabled",
+        "paper_trading": settings.PAPER_TRADING_ENABLED,
+        "live_trading": False,
         "deriv_available": deriv_available,
-        "paper_engine": True
+        "live_broker_adapter": False,
     }

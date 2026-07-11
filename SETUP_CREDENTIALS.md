@@ -44,8 +44,8 @@ ENCRYPTION_KEY=<GENERATE_NEW_RANDOM>
 GEMINI_API_KEY=<YOUR_GEMINI_API_KEY>
 
 # Your domain
-APP_URL=https://arotrade.aroftlabs.com
-ALLOWED_ORIGINS=https://arotrade.aroftlabs.com
+APP_URL=https://arotrader.arosoftlabs.com
+ALLOWED_ORIGINS=https://arotrader.arosoftlabs.com
 ```
 
 ### Step 3: Generate Secure Secrets
@@ -123,8 +123,8 @@ GEMINI_MODEL=gemini-2.5-flash
 
 REDIS_URL=redis://redis:6379/0
 
-APP_URL=https://arotrade.aroftlabs.com
-ALLOWED_ORIGINS=https://arotrade.aroftlabs.com
+APP_URL=https://arotrader.arosoftlabs.com
+ALLOWED_ORIGINS=https://arotrader.arosoftlabs.com
 CORS_CREDENTIALS=true
 
 ENABLE_LIVE_TRADING=false
@@ -298,7 +298,7 @@ grep "GEMINI_API_KEY=" .env
 | JWT_SECRET generated | ✅ | 32+ random chars |
 | ENCRYPTION_KEY generated | ✅ | 32+ random chars |
 | Gemini API key added | ✅ | From makersuite.google.com |
-| Domain configured | ✅ | arotrade.aroftlabs.com |
+| Domain configured | ✅ | arotrader.arosoftlabs.com |
 | SSL/HTTPS working | ✅ | Caddy auto-manages |
 | .env protected in git | ✅ | Not in .gitignore violation |
 | Admin user created | ✅ | Via scripts/create_admin.py |
@@ -329,7 +329,7 @@ docker compose up -d
 docker compose ps
 
 # Check health
-curl https://arotrade.aroftlabs.com/api/health
+curl https://arotrader.arosoftlabs.com/api/health
 
 # View logs
 docker compose logs -f

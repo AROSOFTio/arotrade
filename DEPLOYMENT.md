@@ -1,7 +1,7 @@
 # AroTrade AI - Deployment Guide
 
 **Deployment Target:** VPS at `95.111.234.34`  
-**Domain:** `arotrade.aroftlabs.com`  
+**Domain:** `arotrader.arosoftlabs.com`  
 **Platform:** Coolify (self-hosted Docker orchestration)
 
 ---
@@ -98,8 +98,8 @@ GEMINI_API_KEY=<your-gemini-api-key>
 GEMINI_MODEL=gemini-2.5-flash
 
 # Domain
-APP_URL=https://arotrade.aroftlabs.com
-ALLOWED_ORIGINS=https://arotrade.aroftlabs.com
+APP_URL=https://arotrader.arosoftlabs.com
+ALLOWED_ORIGINS=https://arotrader.arosoftlabs.com
 
 # Trading
 ENABLE_LIVE_TRADING=false  # KEEP FALSE
@@ -115,7 +115,7 @@ DERIV_API_TOKEN_DEMO=<your-deriv-demo-token>
 ### 2.3 Verify DNS
 
 ```bash
-dig +short arotrade.aroftlabs.com
+dig +short arotrader.arosoftlabs.com
 ```
 
 **Expected output:** `95.111.234.34`
@@ -195,25 +195,25 @@ Confirm password: <secure-password>
 
 ```bash
 # API health
-curl https://arotrade.aroftlabs.com/api/health
+curl https://arotrader.arosoftlabs.com/api/health
 
 # Expected response:
 # {"status":"healthy","version":"1.0.0","timestamp":"2024-01-01T..."}
 
 # AI service health
-curl https://arotrade.aroftlabs.com/api/ai/health
+curl https://arotrader.arosoftlabs.com/api/ai/health
 
 # Execution engine health
-curl https://arotrade.aroftlabs.com/api/execution/health
+curl https://arotrader.arosoftlabs.com/api/execution/health
 ```
 
 ### 4.2 Website Access
 
-- **Landing Page:** https://arotrade.aroftlabs.com
-- **Login:** https://arotrade.aroftlabs.com/login
-- **Register:** https://arotrade.aroftlabs.com/register
-- **Dashboard:** https://arotrade.aroftlabs.com/dashboard (requires login)
-- **Admin Panel:** https://arotrade.aroftlabs.com/admin (requires admin login)
+- **Landing Page:** https://arotrader.arosoftlabs.com
+- **Login:** https://arotrader.arosoftlabs.com/login
+- **Register:** https://arotrader.arosoftlabs.com/register
+- **Dashboard:** https://arotrader.arosoftlabs.com/dashboard (requires login)
+- **Admin Panel:** https://arotrader.arosoftlabs.com/admin (requires admin login)
 
 ---
 
@@ -364,7 +364,7 @@ docker compose config | grep POSTGRES
 docker compose exec api python -c "from app.config import settings; print(settings.GEMINI_API_KEY)"
 
 # Verify API connectivity
-curl -I https://arotrade.aroftlabs.com/api/health
+curl -I https://arotrader.arosoftlabs.com/api/health
 ```
 
 ### SSL Certificate Issues

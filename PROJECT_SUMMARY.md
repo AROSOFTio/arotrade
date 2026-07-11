@@ -251,7 +251,7 @@ docker compose exec api alembic upgrade head
 docker compose exec api python scripts/create_admin.py
 
 # Verify
-curl https://arotrade.aroftlabs.com/api/health
+curl https://arotrader.arosoftlabs.com/api/health
 ```
 
 ---
@@ -274,8 +274,8 @@ ENCRYPTION_KEY=<random-32-char-string>
 GEMINI_API_KEY=<your-gemini-api-key>
 
 # Domain
-APP_URL=https://arotrade.aroftlabs.com
-ALLOWED_ORIGINS=https://arotrade.aroftlabs.com
+APP_URL=https://arotrader.arosoftlabs.com
+ALLOWED_ORIGINS=https://arotrader.arosoftlabs.com
 
 # CRITICAL - Keep as false
 ENABLE_LIVE_TRADING=false
@@ -447,7 +447,7 @@ ENABLE_LIVE_TRADING=false
    - Add to .env as GEMINI_API_KEY
 
 3. **⚠️ Verify DNS**
-   - Ensure arotrade.aroftlabs.com → 95.111.234.34
+   - Ensure arotrader.arosoftlabs.com → 95.111.234.34
    - Wait for propagation if needed
 
 4. **⚠️ Deploy to VPS**

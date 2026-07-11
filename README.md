@@ -139,7 +139,7 @@ See `.env.example` for the complete list. Key variables:
 # App
 APP_NAME=AroTrade AI
 APP_ENV=production
-APP_URL=https://arotrade.aroftlabs.com
+APP_URL=https://arotrader.arosoftlabs.com
 
 # Database
 POSTGRES_DB=arotrade
