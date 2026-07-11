@@ -142,6 +142,15 @@ async def get_current_user_info(
             detail="User not found"
         )
 
+    if user.enable_live_trading and user.accepted_live_disclaimer and user.trading_mode != models.TradingMode.LIVE:
+        user.trading_mode = models.TradingMode.LIVE
+        db.commit()
+        db.refresh(user)
+    elif not user.enable_live_trading and user.trading_mode != models.TradingMode.DEMO:
+        user.trading_mode = models.TradingMode.DEMO
+        db.commit()
+        db.refresh(user)
+
     return user
 
 

@@ -32,14 +32,40 @@ def _metaapi_error(exc: metaapi.MetaApiError) -> HTTPException:
     return HTTPException(status_code=exc.status_code if exc.status_code >= 400 else 502, detail=str(exc))
 
 
+def _apply_remote_state(account: models.BrokerAccount, remote: dict) -> bool:
+    """Copy MetaApi deployment state onto our local broker account row."""
+    previous_state = account.connection_state
+    state = (remote.get("state") or "").lower()
+    if state:
+        account.connection_state = "deployed" if state == "deployed" else state
+    return account.connection_state != previous_state
+
+
 @router.get("", response_model=list[schemas.BrokerAccountResponse])
 async def list_broker_accounts(
     current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
     db: Session = Depends(get_db),
 ):
-    return db.query(models.BrokerAccount).filter(
+    accounts = db.query(models.BrokerAccount).filter(
         models.BrokerAccount.user_id == current_user["user_id"]
     ).order_by(models.BrokerAccount.created_at.desc()).all()
+
+    has_updates = False
+    for account in accounts:
+        if not account.is_active or not account.metaapi_account_id:
+            continue
+        try:
+            remote = metaapi.get_account(account.metaapi_account_id)
+        except metaapi.MetaApiError:
+            continue
+        has_updates = _apply_remote_state(account, remote) or has_updates
+
+    if has_updates:
+        db.commit()
+        for account in accounts:
+            db.refresh(account)
+
+    return accounts
 
 
 @router.post("", response_model=schemas.BrokerAccountResponse, status_code=status.HTTP_201_CREATED)
@@ -193,7 +219,7 @@ async def refresh_account_state(
 
     state = (remote.get("state") or "").lower()          # CREATED/DEPLOYING/DEPLOYED/UNDEPLOYING/UNDEPLOYED
     connection = (remote.get("connectionStatus") or "").lower()  # connected/disconnected/connecting
-    account.connection_state = "deployed" if state == "deployed" else (state or account.connection_state)
+    _apply_remote_state(account, remote)
 
     if state == "deployed" and connection == "connected":
         try:
