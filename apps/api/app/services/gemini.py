@@ -51,6 +51,36 @@ class GeminiError(Exception):
     """Raised when the Gemini call or its response parsing fails."""
 
 
+def answer_analysis_question(analysis_summary: str, history: list[dict], question: str) -> str:
+    """Follow-up Q&A about a stored analysis. History is [{role, content}] with
+    role 'user' or 'assistant'; returns a plain-text answer."""
+    if not settings.GEMINI_API_KEY:
+        raise GeminiNotConfigured("GEMINI_API_KEY is not configured")
+
+    genai.configure(api_key=settings.GEMINI_API_KEY)
+    model = genai.GenerativeModel(settings.GEMINI_MODEL)
+
+    transcript = ""
+    for message in history[-10:]:
+        speaker = "Trader" if message.get("role") == "user" else "Analyst"
+        transcript += f"{speaker}: {str(message.get('content', ''))[:500]}\n"
+
+    prompt = (
+        "You are a patient trading mentor. A trader is asking follow-up questions about "
+        "an AI market analysis. Explain clearly in plain language, define any jargon you "
+        "use, keep answers under 150 words, never promise profits, and remind them of the "
+        "risk side when relevant. Do not invent new price levels beyond the analysis.\n\n"
+        f"THE ANALYSIS BEING DISCUSSED:\n{analysis_summary}\n\n"
+        f"CONVERSATION SO FAR:\n{transcript}"
+        f"Trader: {question[:500]}\nAnalyst:"
+    )
+    try:
+        response = model.generate_content(prompt, generation_config={"temperature": 0.4})
+        return (response.text or "").strip()
+    except Exception as exc:
+        raise GeminiError(f"Gemini request failed: {exc}") from exc
+
+
 class GeminiNotConfigured(GeminiError):
     """Raised when no API key is configured."""
 

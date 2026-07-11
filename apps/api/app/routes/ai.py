@@ -6,7 +6,12 @@ from app import models, schemas
 from app.database import get_db
 from app.config import settings
 from app.services import marketdata
-from app.services.gemini import GeminiError, GeminiNotConfigured, run_chart_analysis
+from app.services.gemini import (
+    GeminiError,
+    GeminiNotConfigured,
+    answer_analysis_question,
+    run_chart_analysis,
+)
 
 router = APIRouter()
 
@@ -190,6 +195,48 @@ async def signal_of_the_day(
     db.commit()
     db.refresh(analysis)
     return analysis
+
+
+@router.post("/analyses/{analysis_id}/chat")
+async def chat_about_analysis(
+    analysis_id: int,
+    payload: dict,
+    current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Follow-up Q&A about one of the user's analyses (plain-language mentor mode)."""
+    question = str(payload.get("question", "")).strip()
+    if not question:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="question is required")
+    history = payload.get("history") or []
+    if not isinstance(history, list):
+        history = []
+
+    analysis = db.query(models.AIAnalysis).filter(
+        models.AIAnalysis.id == analysis_id,
+        models.AIAnalysis.user_id == current_user["user_id"]
+    ).first()
+    if not analysis:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found")
+
+    summary = (
+        f"{analysis.symbol} {analysis.timeframe} | bias {analysis.bias} | signal {analysis.signal} "
+        f"| confidence {analysis.confidence}% | entry {analysis.entry_min}-{analysis.entry_max} "
+        f"| stop loss {analysis.stop_loss} | targets {analysis.take_profit_1}/{analysis.take_profit_2}/{analysis.take_profit_3} "
+        f"| reward:risk {analysis.risk_reward}\n"
+        f"Reasoning: {'; '.join(analysis.reasoning or [])}\n"
+        f"Invalidation: {analysis.invalidation}\n"
+        f"Risk warning: {analysis.risk_warning or '-'}"
+    )
+
+    try:
+        answer = answer_analysis_question(summary, history, question)
+    except GeminiNotConfigured:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="AI service not configured")
+    except GeminiError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"AI chat failed: {exc}")
+
+    return {"answer": answer}
 
 
 @router.get("/analyses")

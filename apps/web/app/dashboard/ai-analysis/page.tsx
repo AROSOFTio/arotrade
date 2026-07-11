@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Bot, ImagePlus, ShieldAlert, Sparkles, TriangleAlert, X } from 'lucide-react'
+import { Bot, ImagePlus, MessageCircleQuestion, Send, ShieldAlert, Sparkles, TriangleAlert, X } from 'lucide-react'
 
 import { apiRequest, errorMessage, formatDate } from '../../components/api'
 import { PageHeader } from '../../components/page-header'
@@ -63,7 +63,30 @@ export default function AIAnalysisPage() {
   const [error, setError] = useState('')
   const [result, setResult] = useState<Analysis | null>(null)
   const [history, setHistory] = useState<Analysis[]>([])
+  const [chat, setChat] = useState<{ role: 'user' | 'assistant'; content: string }[]>([])
+  const [chatInput, setChatInput] = useState('')
+  const [chatLoading, setChatLoading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const askQuestion = async () => {
+    if (!result || !chatInput.trim() || chatLoading) return
+    const question = chatInput.trim()
+    setChatInput('')
+    const nextChat = [...chat, { role: 'user' as const, content: question }]
+    setChat(nextChat)
+    setChatLoading(true)
+    try {
+      const response = await apiRequest<{ answer: string }>(`/ai/analyses/${result.id}/chat`, {
+        method: 'POST',
+        body: JSON.stringify({ question, history: chat }),
+      })
+      setChat([...nextChat, { role: 'assistant', content: response.answer }])
+    } catch (requestError) {
+      setChat([...nextChat, { role: 'assistant', content: `Sorry — ${errorMessage(requestError)}` }])
+    } finally {
+      setChatLoading(false)
+    }
+  }
 
   const loadHistory = () => {
     apiRequest<Analysis[]>('/ai/analyses?limit=10').then(setHistory).catch(() => undefined)
@@ -107,6 +130,7 @@ export default function AIAnalysisPage() {
         })
       }
       setResult(analysis)
+      setChat([])
       loadHistory()
     } catch (requestError) {
       setError(errorMessage(requestError))
@@ -120,7 +144,7 @@ export default function AIAnalysisPage() {
       <PageHeader
         eyebrow="Research"
         title="AI analysis"
-        description="Upload a chart screenshot for a full technical read, or run a quick market view. Analyses never open trades by themselves."
+        description="Pick a symbol and the AI analyzes live market prices directly — no screenshot needed. Ask follow-up questions until everything is clear. Analyses never open trades by themselves."
       />
       <section className="grid gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
         <form onSubmit={handleSubmit} className="card h-fit space-y-4">
@@ -160,7 +184,7 @@ export default function AIAnalysisPage() {
           )}
 
           <div>
-            <span className="label">Chart screenshot (recommended)</span>
+            <span className="label">Chart screenshot (optional)</span>
             {previewUrl ? (
               <div className="relative overflow-hidden rounded-md border border-slate-200">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -180,7 +204,7 @@ export default function AIAnalysisPage() {
               </button>
             )}
             <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-            <p className="mt-1.5 text-xs text-slate-500">Without an image the AI has no live prices, so confidence is capped and levels must be verified.</p>
+            <p className="mt-1.5 text-xs text-slate-500">The AI reads live prices for all listed symbols automatically. Add a screenshot only when you want it to see your own chart drawings or indicators.</p>
           </div>
 
           <div>
@@ -256,13 +280,44 @@ export default function AIAnalysisPage() {
                   <ShieldAlert size={17} className="mt-0.5 shrink-0" aria-hidden="true" /> {result.risk_warning}
                 </div>
               )}
+
+              <div className="border-t border-slate-200 pt-4">
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                  <MessageCircleQuestion size={16} className="text-[#2563eb]" aria-hidden="true" /> Ask about this analysis
+                </h3>
+                <p className="mt-1 text-xs text-slate-500">Don&apos;t understand a term or a level? Ask in plain language — the AI mentor explains this exact analysis.</p>
+                {chat.length > 0 && (
+                  <div className="mt-3 max-h-72 space-y-2 overflow-y-auto">
+                    {chat.map((message, index) => (
+                      <div key={index} className={`rounded-md px-3 py-2.5 text-sm leading-6 ${message.role === 'user' ? 'ml-8 bg-blue-50 text-slate-800' : 'mr-8 bg-slate-50 text-slate-700'}`}>
+                        {message.content}
+                      </div>
+                    ))}
+                    {chatLoading && <div className="mr-8 rounded-md bg-slate-50 px-3 py-2.5 text-sm text-slate-400">Thinking…</div>}
+                  </div>
+                )}
+                <div className="mt-3 flex gap-2">
+                  <input
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void askQuestion() } }}
+                    className="input-base"
+                    placeholder="e.g. What does invalidation mean here? Why is the stop at that level?"
+                    maxLength={500}
+                    aria-label="Ask a question about this analysis"
+                  />
+                  <button type="button" onClick={() => void askQuestion()} disabled={chatLoading || !chatInput.trim()} className="btn-primary shrink-0 px-3" title="Send question" aria-label="Send question">
+                    <Send size={16} aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
             </div>
           ) : (
             <div className="card flex min-h-48 flex-col items-center justify-center gap-3 text-center">
               <span className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-[#2563eb]"><Bot size={24} aria-hidden="true" /></span>
               <div>
                 <h2 className="text-sm font-semibold text-slate-900">No analysis yet</h2>
-                <p className="mt-1 max-w-sm text-sm leading-6 text-slate-500">Add a chart screenshot and run the analysis — the result appears here with levels, reasoning and warnings.</p>
+                <p className="mt-1 max-w-sm text-sm leading-6 text-slate-500">Pick a symbol and run the analysis — the AI reads live prices automatically. The result appears here with levels, reasoning and warnings, and you can ask it questions.</p>
               </div>
             </div>
           )}
@@ -272,7 +327,7 @@ export default function AIAnalysisPage() {
               <h2 className="text-sm font-semibold text-slate-900">Recent analyses</h2>
               <div className="mt-3 divide-y divide-slate-100">
                 {history.map((item) => (
-                  <button key={item.id} type="button" onClick={() => setResult(item)} className="flex w-full cursor-pointer items-center justify-between gap-3 py-2.5 text-left transition-colors hover:bg-slate-50">
+                  <button key={item.id} type="button" onClick={() => { setResult(item); setChat([]) }} className="flex w-full cursor-pointer items-center justify-between gap-3 py-2.5 text-left transition-colors hover:bg-slate-50">
                     <span className="text-sm font-semibold text-slate-900">{item.symbol} <span className="font-normal text-slate-500">· {item.timeframe}</span></span>
                     <span className="flex items-center gap-2">
                       <span className={`rounded-full px-2 py-0.5 text-xs font-bold uppercase ${signalTone(item.signal)}`}>{item.signal}</span>
