@@ -13,6 +13,7 @@ type User = {
   role: string
   trading_mode: string
   enable_live_trading: boolean
+  accepted_live_disclaimer: boolean
   is_active: boolean
   created_at: string
 }
@@ -65,7 +66,8 @@ export default function SettingsPage() {
     }
   }
 
-  const workspaceMode = user?.enable_live_trading && user.trading_mode?.toLowerCase() === 'live' ? 'Live' : 'Demo'
+  const liveConfirmed = Boolean(user?.enable_live_trading && user.accepted_live_disclaimer)
+  const workspaceMode = liveConfirmed && user?.trading_mode?.toLowerCase() === 'live' ? 'Live' : 'Demo'
   const deployedAccounts = brokerAccounts.filter((account) =>
     account.is_active && account.metaapi_account_id && account.connection_state === 'deployed'
   )
@@ -101,12 +103,12 @@ export default function SettingsPage() {
             <div className="flex items-center justify-between gap-4 py-3">
               <dt className="text-slate-500">Live trading</dt>
               <dd className="flex items-center gap-3">
-                <span className={`font-semibold ${user?.enable_live_trading ? 'text-[#15803d]' : 'text-slate-900'}`}>{user?.enable_live_trading ? 'Enabled' : 'Off'}</span>
+                <span className={`font-semibold ${liveConfirmed ? 'text-[#15803d]' : user?.enable_live_trading ? 'text-amber-700' : 'text-slate-900'}`}>{liveConfirmed ? 'Enabled' : user?.enable_live_trading ? 'Needs confirmation' : 'Off'}</span>
                 {user && (
-                  user.enable_live_trading ? (
+                  liveConfirmed ? (
                     <button type="button" disabled={saving} className="btn-secondary min-h-8 px-3 py-1 text-xs" onClick={() => updateLiveTrading(false)}>Turn off</button>
                   ) : (
-                    <button type="button" disabled={saving} className="btn-secondary min-h-8 px-3 py-1 text-xs" onClick={() => setShowConsent(true)}>Enable</button>
+                    <button type="button" disabled={saving} className="btn-secondary min-h-8 px-3 py-1 text-xs" onClick={() => setShowConsent(true)}>{user.enable_live_trading ? 'Confirm' : 'Enable'}</button>
                   )
                 )}
               </dd>

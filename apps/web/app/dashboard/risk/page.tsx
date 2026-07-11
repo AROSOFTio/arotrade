@@ -12,6 +12,7 @@ type UserSettings = {
   max_open_trades: number
   trading_mode: string
   enable_live_trading: boolean
+  accepted_live_disclaimer: boolean
 }
 
 type BrokerAccount = {
@@ -74,7 +75,8 @@ export default function RiskPage() {
     }
   }
 
-  const workspaceMode = settings?.enable_live_trading && settings.trading_mode?.toLowerCase() === 'live' ? 'Live' : 'Demo'
+  const liveConfirmed = Boolean(settings?.enable_live_trading && settings.accepted_live_disclaimer)
+  const workspaceMode = liveConfirmed && settings?.trading_mode?.toLowerCase() === 'live' ? 'Live' : 'Demo'
   const deployedAccounts = brokerAccounts.filter((account) =>
     account.is_active && account.metaapi_account_id && account.connection_state === 'deployed'
   )
@@ -137,7 +139,7 @@ export default function RiskPage() {
             </div>
             <div className="flex justify-between gap-3">
               <dt className="text-slate-500">Live permission</dt>
-              <dd className="font-semibold text-slate-900">{settings?.enable_live_trading ? 'Enabled' : 'Locked'}</dd>
+              <dd className={`font-semibold ${liveConfirmed ? 'text-[#15803d]' : settings?.enable_live_trading ? 'text-amber-700' : 'text-slate-900'}`}>{liveConfirmed ? 'Enabled' : settings?.enable_live_trading ? 'Needs confirmation' : 'Locked'}</dd>
             </div>
           </dl>
         </aside>

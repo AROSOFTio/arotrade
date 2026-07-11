@@ -52,7 +52,7 @@ const initialForm: SignalForm = {
   notes: '',
 }
 
-type LiveUser = { enable_live_trading: boolean }
+type LiveUser = { enable_live_trading: boolean; accepted_live_disclaimer: boolean }
 
 type LiveBrokerAccount = {
   id: number
@@ -247,6 +247,8 @@ export default function SignalsPage() {
           <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900"><Zap size={15} className="text-amber-600" aria-hidden="true" /> Live execution</h2>
           {!liveUser?.enable_live_trading ? (
             <p className="mt-2 rounded-md bg-slate-50 px-3 py-3 text-xs leading-5 text-slate-600">Live trading is off for your account. Enable it in Settings to send approved signals to your broker.</p>
+          ) : !liveUser.accepted_live_disclaimer ? (
+            <p className="mt-2 rounded-md bg-slate-50 px-3 py-3 text-xs leading-5 text-slate-600">Live trading still needs your risk confirmation in Settings before orders can go to your broker.</p>
           ) : liveAccounts.length === 0 ? (
             <p className="mt-2 rounded-md bg-slate-50 px-3 py-3 text-xs leading-5 text-slate-600">No connected broker account. Connect your MT5/Exness account on the Broker accounts page, then deploy it.</p>
           ) : (

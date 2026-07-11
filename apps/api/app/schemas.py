@@ -30,6 +30,7 @@ class UserResponse(BaseModel):
     role: str
     trading_mode: str
     enable_live_trading: bool
+    accepted_live_disclaimer: bool
     default_risk_percent: float
     max_daily_loss_percent: float
     max_open_trades: int

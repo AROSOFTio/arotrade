@@ -32,6 +32,7 @@ type User = {
   role: string
   trading_mode: string
   enable_live_trading: boolean
+  accepted_live_disclaimer: boolean
 }
 
 type Notification = {
@@ -128,7 +129,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     .map((part) => part[0])
     .join('')
     .toUpperCase()
-  const isLiveMode = user?.enable_live_trading && user.trading_mode?.toLowerCase() === 'live'
+  const isLiveMode = user?.enable_live_trading && user.accepted_live_disclaimer && user.trading_mode?.toLowerCase() === 'live'
   const modeBadgeClass = isLiveMode
     ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
     : 'border-blue-200 bg-blue-50 text-[#1d4ed8]'
