@@ -191,7 +191,9 @@ async def update_live_trading_preference(
             detail="You must accept the live-trading risk disclaimer to enable live trading"
         )
 
+    previous_mode = user.trading_mode.value if user.trading_mode else None
     user.enable_live_trading = payload.enable
+    user.trading_mode = models.TradingMode.LIVE if payload.enable else models.TradingMode.DEMO
     if payload.enable:
         user.accepted_live_disclaimer = True
 
@@ -203,6 +205,10 @@ async def update_live_trading_preference(
         changes={
             "enable_live_trading": payload.enable,
             "accepted_live_disclaimer": bool(payload.enable),
+            "trading_mode": {
+                "from": previous_mode,
+                "to": user.trading_mode.value,
+            },
         }
     )
     db.add(audit)

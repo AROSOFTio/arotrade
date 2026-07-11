@@ -17,15 +17,34 @@ type User = {
   created_at: string
 }
 
+type BrokerAccount = {
+  id: number
+  account_id: string
+  account_type: string
+  server?: string | null
+  connection_state?: string | null
+  metaapi_account_id?: string | null
+  is_active: boolean
+}
+
 export default function SettingsPage() {
   const [user, setUser] = useState<User | null>(null)
+  const [brokerAccounts, setBrokerAccounts] = useState<BrokerAccount[]>([])
   const [error, setError] = useState('')
   const [showConsent, setShowConsent] = useState(false)
   const [consentChecked, setConsentChecked] = useState(false)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    apiRequest<User>('/auth/me').then(setUser).catch((requestError) => setError(errorMessage(requestError)))
+    Promise.all([
+      apiRequest<User>('/auth/me'),
+      apiRequest<BrokerAccount[]>('/broker-accounts'),
+    ])
+      .then(([nextUser, nextBrokerAccounts]) => {
+        setUser(nextUser)
+        setBrokerAccounts(nextBrokerAccounts)
+      })
+      .catch((requestError) => setError(errorMessage(requestError)))
   }, [])
 
   const updateLiveTrading = async (enable: boolean, acceptDisclaimer = false) => {
@@ -45,6 +64,14 @@ export default function SettingsPage() {
       setSaving(false)
     }
   }
+
+  const workspaceMode = user?.enable_live_trading && user.trading_mode?.toLowerCase() === 'live' ? 'Live' : 'Demo'
+  const deployedAccounts = brokerAccounts.filter((account) =>
+    account.is_active && account.metaapi_account_id && account.connection_state === 'deployed'
+  )
+  const liveBroker = deployedAccounts.find((account) => account.account_type?.toLowerCase() === 'live')
+  const brokerAdapter = liveBroker || deployedAccounts[0]
+  const brokerAdapterLabel = brokerAdapter ? `${brokerAdapter.account_type.toUpperCase()} connected` : 'Not connected'
 
   return (
     <>
@@ -70,7 +97,7 @@ export default function SettingsPage() {
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-[#2563eb]"><ShieldCheck size={20} aria-hidden="true" /></div>
           <h2 className="mt-4 text-base font-semibold text-slate-900">Execution profile</h2>
           <dl className="mt-4 divide-y divide-slate-100 text-sm">
-            <div className="flex justify-between gap-4 py-3"><dt className="text-slate-500">Workspace mode</dt><dd className="font-semibold capitalize text-[#1d4ed8]">{user?.trading_mode || 'Demo'}</dd></div>
+            <div className="flex justify-between gap-4 py-3"><dt className="text-slate-500">Workspace mode</dt><dd className={`font-semibold ${workspaceMode === 'Live' ? 'text-[#15803d]' : 'text-[#1d4ed8]'}`}>{workspaceMode}</dd></div>
             <div className="flex items-center justify-between gap-4 py-3">
               <dt className="text-slate-500">Live trading</dt>
               <dd className="flex items-center gap-3">
@@ -84,7 +111,15 @@ export default function SettingsPage() {
                 )}
               </dd>
             </div>
-            <div className="flex justify-between gap-4 py-3"><dt className="text-slate-500">Broker adapter</dt><dd className="font-semibold text-slate-900">Not connected</dd></div>
+            <div className="flex justify-between gap-4 py-3">
+              <dt className="text-slate-500">Broker adapter</dt>
+              <dd className="text-right">
+                <span className={`font-semibold ${brokerAdapter ? 'text-[#15803d]' : 'text-slate-900'}`}>{brokerAdapterLabel}</span>
+                {brokerAdapter && (
+                  <span className="mt-0.5 block text-xs font-medium text-slate-500">{brokerAdapter.account_id}{brokerAdapter.server ? ` - ${brokerAdapter.server}` : ''}</span>
+                )}
+              </dd>
+            </div>
           </dl>
           <p className="mt-3 text-xs leading-5 text-slate-500">
             Live trading is your choice. Enabling it records your consent; live orders start flowing once a broker adapter (MT5 / Deriv) is connected to your account.

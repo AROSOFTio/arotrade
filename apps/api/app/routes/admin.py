@@ -146,7 +146,10 @@ async def enable_user_live_trading(
             detail="User not found"
         )
 
+    previous_mode = user.trading_mode.value if user.trading_mode else None
     user.enable_live_trading = True
+    user.accepted_live_disclaimer = True
+    user.trading_mode = models.TradingMode.LIVE
     db.commit()
 
     # Log audit
@@ -155,7 +158,14 @@ async def enable_user_live_trading(
         action="enable_live_trading",
         resource="user",
         resource_id=user_id,
-        changes={"enable_live_trading": True}
+        changes={
+            "enable_live_trading": True,
+            "accepted_live_disclaimer": True,
+            "trading_mode": {
+                "from": previous_mode,
+                "to": user.trading_mode.value,
+            },
+        }
     )
     db.add(audit)
     db.commit()

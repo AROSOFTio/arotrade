@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Landmark, Link2, Power, RefreshCw, Rocket, Square } from 'lucide-react'
 
 import { apiRequest, errorMessage, formatDate, formatNumber } from '../../components/api'
@@ -41,12 +41,32 @@ export default function BrokerAccountsPage() {
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
 
-  const loadAccounts = async () => {
-    setLoading(true)
-    try { setAccounts(await apiRequest<BrokerAccount[]>('/broker-accounts')) } catch (requestError) { setError(errorMessage(requestError)) } finally { setLoading(false) }
-  }
+  const refreshAccountStates = useCallback(async (initialAccounts: BrokerAccount[]) => {
+    const refreshableAccounts = initialAccounts.filter((account) => account.metaapi_account_id && account.is_active)
+    if (!refreshableAccounts.length) return
 
-  useEffect(() => { void loadAccounts() }, [])
+    const results = await Promise.allSettled(
+      refreshableAccounts.map((account) => apiRequest<BrokerAccount>(`/broker-accounts/${account.id}/state`)),
+    )
+    const refreshedAccounts = results
+      .filter((result): result is PromiseFulfilledResult<BrokerAccount> => result.status === 'fulfilled')
+      .map((result) => result.value)
+
+    if (refreshedAccounts.length) {
+      setAccounts((current) => current.map((account) => refreshedAccounts.find((item) => item.id === account.id) || account))
+    }
+  }, [])
+
+  const loadAccounts = useCallback(async () => {
+    setLoading(true)
+    try {
+      const nextAccounts = await apiRequest<BrokerAccount[]>('/broker-accounts')
+      setAccounts(nextAccounts)
+      void refreshAccountStates(nextAccounts)
+    } catch (requestError) { setError(errorMessage(requestError)) } finally { setLoading(false) }
+  }, [refreshAccountStates])
+
+  useEffect(() => { void loadAccounts() }, [loadAccounts])
 
   const connectMt5 = async (event: React.FormEvent) => {
     event.preventDefault()

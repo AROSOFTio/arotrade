@@ -128,6 +128,13 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     .map((part) => part[0])
     .join('')
     .toUpperCase()
+  const isLiveMode = user?.enable_live_trading && user.trading_mode?.toLowerCase() === 'live'
+  const modeBadgeClass = isLiveMode
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+    : 'border-blue-200 bg-blue-50 text-[#1d4ed8]'
+  const executionBadgeClass = isLiveMode
+    ? 'bg-emerald-50 text-emerald-700'
+    : 'bg-blue-50 text-[#1d4ed8]'
 
   const signOut = async () => {
     try {
@@ -178,9 +185,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
       </nav>
 
       <div className="border-t border-slate-200 p-3">
-        <div className="mb-3 flex items-center gap-2 rounded-md bg-blue-50 px-3 py-2 text-xs font-semibold text-[#1d4ed8]">
+        <div className={`mb-3 flex items-center gap-2 rounded-md px-3 py-2 text-xs font-semibold ${executionBadgeClass}`}>
           <ShieldCheck size={16} aria-hidden="true" />
-          Paper execution only
+          {isLiveMode ? 'Live execution enabled' : 'Paper execution only'}
         </div>
         <button type="button" onClick={signOut} className="flex h-10 w-full items-center gap-3 rounded-md px-3 text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-950">
           <LogOut size={18} aria-hidden="true" />
@@ -217,7 +224,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
             </div>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
-            <span className="hidden rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-[#1d4ed8] sm:inline-flex">Demo mode</span>
+            <span className={`hidden rounded-md border px-2.5 py-1 text-xs font-semibold sm:inline-flex ${modeBadgeClass}`}>{isLiveMode ? 'Live mode' : 'Demo mode'}</span>
             <ThemeToggle />
             <div className="relative">
               <button
@@ -276,8 +283,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
         <footer className="border-t border-slate-200 bg-white px-4 py-4 text-xs text-slate-500 sm:px-6 lg:px-8">
           <div className="mx-auto flex max-w-[1600px] flex-col justify-between gap-1 sm:flex-row sm:items-center">
-            <span>© {new Date().getFullYear()} AROFi. AroTrader is operating in paper mode.</span>
-            <span>Live execution unlocks when a broker adapter is connected.</span>
+            <span>© {new Date().getFullYear()} AROFi. {isLiveMode ? 'AroTrader live execution is enabled.' : 'AroTrader is operating in paper mode.'}</span>
+            <span>{isLiveMode ? 'Risk controls still apply to every live order.' : 'Live execution unlocks when a broker adapter is connected.'}</span>
           </div>
         </footer>
       </div>
