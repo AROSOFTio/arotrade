@@ -49,26 +49,43 @@ export default function MarketsPage() {
   useEffect(() => {
     const container = chartContainerRef.current
     if (!container) return
+
+    const themeOptions = (dark: boolean) => ({
+      layout: {
+        background: { color: dark ? '#101828' : '#ffffff' },
+        textColor: dark ? '#94a3b8' : '#334155',
+      },
+      grid: {
+        vertLines: { color: dark ? '#182238' : '#f1f5f9' },
+        horzLines: { color: dark ? '#182238' : '#f1f5f9' },
+      },
+      timeScale: { timeVisible: true, secondsVisible: false, borderColor: dark ? '#1e293f' : '#e2e8f0' },
+      rightPriceScale: { borderColor: dark ? '#1e293f' : '#e2e8f0' },
+    })
+
+    const isDark = () => document.documentElement.classList.contains('dark')
+    const chartHeight = () => (window.innerWidth < 640 ? 300 : 420)
+
     const chart = createChart(container, {
-      height: 420,
-      layout: { background: { color: '#ffffff' }, textColor: '#334155' },
-      grid: { vertLines: { color: '#f1f5f9' }, horzLines: { color: '#f1f5f9' } },
-      timeScale: { timeVisible: true, secondsVisible: false, borderColor: '#e2e8f0' },
-      rightPriceScale: { borderColor: '#e2e8f0' },
+      height: chartHeight(),
       crosshair: { mode: 0 },
+      ...themeOptions(isDark()),
     })
     const series = chart.addCandlestickSeries({
-      upColor: '#15803d', downColor: '#b91c1c', borderVisible: false,
-      wickUpColor: '#15803d', wickDownColor: '#b91c1c',
+      upColor: '#22c55e', downColor: '#ef4444', borderVisible: false,
+      wickUpColor: '#22c55e', wickDownColor: '#ef4444',
     })
     chartRef.current = chart
     seriesRef.current = series
 
-    const onResize = () => chart.applyOptions({ width: container.clientWidth })
+    const onResize = () => chart.applyOptions({ width: container.clientWidth, height: chartHeight() })
+    const onTheme = () => chart.applyOptions(themeOptions(isDark()))
     onResize()
     window.addEventListener('resize', onResize)
+    window.addEventListener('themechange', onTheme)
     return () => {
       window.removeEventListener('resize', onResize)
+      window.removeEventListener('themechange', onTheme)
       chart.remove()
       chartRef.current = null
       seriesRef.current = null

@@ -2,6 +2,9 @@
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
+
+import { InstallPrompt } from './components/install-prompt'
+import { ThemeToggle } from './components/theme-toggle'
 import {
   ArrowRight,
   BrainCircuit,
@@ -80,6 +83,7 @@ export default function HomePage() {
 
   return (
     <main className="min-h-screen bg-[#f6f7f9]">
+      <InstallPrompt />
       {/* Navigation */}
       <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/90 backdrop-blur">
         <nav className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-4 sm:px-6" aria-label="Main">
@@ -95,9 +99,10 @@ export default function HomePage() {
             <a href="#how-it-works" className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-950">How it works</a>
             <a href="#security" className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-950">Security</a>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <ThemeToggle />
             {!hasSession && (
-              <Link href="/login" className="text-sm font-semibold text-slate-700 transition-colors hover:text-slate-950">Sign in</Link>
+              <Link href="/login" className="hidden text-sm font-semibold text-slate-700 transition-colors hover:text-slate-950 sm:block">Sign in</Link>
             )}
             <Link href={primaryHref} className="btn-primary">
               {primaryLabel} <ArrowRight size={16} aria-hidden="true" />

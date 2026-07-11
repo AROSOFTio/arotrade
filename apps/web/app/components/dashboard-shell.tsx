@@ -24,6 +24,7 @@ import {
 } from 'lucide-react'
 
 import { apiRequest } from './api'
+import { ThemeToggle } from './theme-toggle'
 
 type User = {
   email: string
@@ -217,6 +218,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
             <span className="hidden rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-[#1d4ed8] sm:inline-flex">Demo mode</span>
+            <ThemeToggle />
             <div className="relative">
               <button
                 type="button"

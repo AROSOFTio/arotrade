@@ -21,12 +21,35 @@
   --danger-bg: #fef2f2;
 }
 
+.dark {
+  --brand: #3b82f6;
+  --brand-dark: #60a5fa;
+  --brand-soft: rgba(59, 130, 246, 0.14);
+  --app-bg: #0a0f1c;
+  --surface: #101828;
+  --surface-subtle: #0d1524;
+  --border: #1e293f;
+  --border-soft: #182238;
+  --text: #f1f5f9;
+  --muted: #94a3b8;
+  --success: #4ade80;
+  --success-bg: rgba(34, 197, 94, 0.12);
+  --warning: #fbbf24;
+  --warning-bg: rgba(245, 158, 11, 0.12);
+  --danger: #f87171;
+  --danger-bg: rgba(239, 68, 68, 0.12);
+}
+
 * {
   box-sizing: border-box;
 }
 
 html {
   background: var(--app-bg);
+}
+
+html.dark {
+  color-scheme: dark;
 }
 
 body {
@@ -73,6 +96,85 @@ textarea:focus-visible {
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
+
+.dark ::-webkit-scrollbar-track {
+  background: #0d1524;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #26324e;
+  border-color: #0d1524;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #33415e;
+}
+
+/* ============================================================
+   Dark theme — token remap for the utility palette used app-wide.
+   Every color utility the app uses gets a deliberate dark value;
+   nothing is inverted or filtered.
+   ============================================================ */
+.dark .bg-white { background-color: var(--surface); }
+.dark .bg-white\/90 { background-color: rgba(16, 24, 40, 0.92); }
+.dark .bg-\[\#f6f7f9\] { background-color: var(--app-bg); }
+.dark .bg-slate-50 { background-color: #0d1524; }
+.dark .bg-slate-50\/60 { background-color: rgba(13, 21, 36, 0.6); }
+.dark .bg-slate-100 { background-color: #182238; }
+.dark .bg-slate-900 { background-color: #e2e8f0; }
+.dark .bg-blue-50 { background-color: rgba(59, 130, 246, 0.14); }
+.dark .bg-blue-50\/50 { background-color: rgba(59, 130, 246, 0.08); }
+.dark .bg-blue-50\/60 { background-color: rgba(59, 130, 246, 0.1); }
+.dark .bg-blue-100 { background-color: rgba(59, 130, 246, 0.2); }
+.dark .bg-\[\#f0fdf4\] { background-color: rgba(34, 197, 94, 0.12); }
+.dark .bg-emerald-50 { background-color: rgba(34, 197, 94, 0.12); }
+.dark .bg-\[\#fef2f2\] { background-color: rgba(239, 68, 68, 0.12); }
+.dark .bg-red-50 { background-color: rgba(239, 68, 68, 0.12); }
+.dark .bg-amber-50 { background-color: rgba(245, 158, 11, 0.12); }
+
+.dark .text-slate-950, .dark .text-slate-900 { color: #f1f5f9; }
+.dark .text-slate-800, .dark .text-slate-700 { color: #cbd5e1; }
+.dark .text-slate-600, .dark .text-slate-500 { color: #94a3b8; }
+.dark .text-slate-400 { color: #64748b; }
+.dark .text-white { color: #ffffff; }
+.dark .bg-slate-900.text-white, .dark .bg-slate-900 { color: #0f172a; }
+.dark .text-\[\#2563eb\], .dark .text-\[\#1d4ed8\] { color: #93c5fd; }
+.dark .text-\[\#15803d\], .dark .text-emerald-700 { color: #4ade80; }
+.dark .text-\[\#b91c1c\], .dark .text-red-700 { color: #f87171; }
+.dark .text-amber-600, .dark .text-amber-700, .dark .text-amber-800 { color: #fbbf24; }
+.dark .text-blue-100 { color: #bfdbfe; }
+
+.dark .border-slate-100, .dark .border-slate-200 { border-color: var(--border); }
+.dark .border-slate-300 { border-color: #26324e; }
+.dark .border-blue-100, .dark .border-blue-200 { border-color: rgba(59, 130, 246, 0.35); }
+.dark .border-emerald-200 { border-color: rgba(34, 197, 94, 0.35); }
+.dark .border-red-200 { border-color: rgba(239, 68, 68, 0.35); }
+.dark .border-amber-200 { border-color: rgba(245, 158, 11, 0.35); }
+.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: var(--border-soft); }
+.dark .divide-slate-50 > :not([hidden]) ~ :not([hidden]) { border-color: var(--border-soft); }
+.dark .border-slate-50 { border-color: var(--border-soft); }
+
+.dark .hover\:bg-slate-50:hover { background-color: #16203a; }
+.dark .hover\:bg-blue-50:hover { background-color: rgba(59, 130, 246, 0.18); }
+.dark .hover\:text-slate-950:hover, .dark .hover\:text-slate-900:hover { color: #f8fafc; }
+.dark .hover\:border-slate-400:hover { border-color: #33415e; }
+.dark .hover\:text-\[\#1d4ed8\]:hover { color: #bfdbfe; }
+.dark .placeholder\:text-slate-400::placeholder { color: #475569; }
+.dark .shadow-sm { box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.4); }
+.dark .shadow-xl { box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.6), 0 8px 10px -6px rgba(0, 0, 0, 0.6); }
+.dark .bg-slate-950\/25 { background-color: rgba(2, 6, 23, 0.6); }
+.dark .bg-slate-950\/40 { background-color: rgba(2, 6, 23, 0.7); }
+.dark .from-blue-100 { --tw-gradient-from: rgba(59, 130, 246, 0.15) var(--tw-gradient-from-position); --tw-gradient-to: rgb(59 130 246 / 0); --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to); }
+.dark .to-blue-50 { --tw-gradient-to: rgba(59, 130, 246, 0.06) var(--tw-gradient-to-position); }
+
+/* Brand blue: brighter in dark for contrast */
+.dark .bg-\[\#2563eb\] { background-color: #3b82f6; }
+.dark .hover\:bg-\[\#1d4ed8\]:hover { background-color: #2563eb; }
+.dark .focus\:border-\[\#2563eb\]:focus { border-color: #3b82f6; }
+.dark .focus\:ring-blue-100:focus { --tw-ring-color: rgba(59, 130, 246, 0.25); }
+
+/* Logo: white-background brand asset gets a soft plate in dark mode */
+.dark img[src="/logo.png"] { background: #ffffff; border-radius: 10px; padding: 2px; }
 
 @layer components {
   .btn-primary {
