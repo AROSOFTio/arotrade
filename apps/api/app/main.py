@@ -8,7 +8,7 @@ from datetime import datetime
 from app.config import settings
 from app.database import engine, SessionLocal
 from app import models
-from app.routes import auth, signals, ai, strategies, backtest, trades, journal, admin, broker_accounts, health, notifications
+from app.routes import auth, signals, ai, strategies, backtest, trades, journal, admin, broker_accounts, health, notifications, market
 
 # Configure logging
 logging.basicConfig(
@@ -77,6 +77,7 @@ app.include_router(trades.router, prefix="/api/trades", tags=["Trading"])
 app.include_router(broker_accounts.router, prefix="/api/broker-accounts", tags=["Broker Accounts"])
 app.include_router(journal.router, prefix="/api/journal", tags=["Journal"])
 app.include_router(notifications.router, prefix="/api/notifications", tags=["Notifications"])
+app.include_router(market.router, prefix="/api/market", tags=["Market Data"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 
 

@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
+  Activity,
   Bell,
   BookOpen,
   Bot,
@@ -50,6 +51,7 @@ type NavigationItem = {
 
 const navigation: NavigationItem[] = [
   { href: '/dashboard', label: 'Overview', icon: LayoutDashboard },
+  { href: '/dashboard/markets', label: 'Markets', icon: Activity },
   { href: '/dashboard/signals', label: 'Signals', icon: Sparkles },
   { href: '/dashboard/trades', label: 'Paper trades', icon: CandlestickChart },
   { href: '/dashboard/strategy-builder', label: 'Strategies', icon: Network },
@@ -58,7 +60,7 @@ const navigation: NavigationItem[] = [
   { href: '/dashboard/journal', label: 'Journal', icon: BookOpen },
   { href: '/dashboard/calculator', label: 'Position size', icon: Calculator },
   { href: '/dashboard/risk', label: 'Risk controls', icon: ShieldCheck },
-  { href: '/dashboard/broker-accounts', label: 'Demo accounts', icon: Landmark },
+  { href: '/dashboard/broker-accounts', label: 'Broker accounts', icon: Landmark },
   { href: '/dashboard/settings', label: 'Settings', icon: Settings2 },
 ]
 

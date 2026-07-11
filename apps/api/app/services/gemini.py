@@ -77,8 +77,14 @@ def run_chart_analysis(
     prompt: Optional[str] = None,
     image_bytes: Optional[bytes] = None,
     image_mime: Optional[str] = None,
+    price_context: Optional[str] = None,
 ) -> dict:
-    """Call Gemini and return a validated analysis dict."""
+    """Call Gemini and return a validated analysis dict.
+
+    price_context is a compact OHLC candle table from the live market data
+    feed; when present the model anchors levels to real prices and the
+    text-only confidence cap is not applied.
+    """
     if not settings.GEMINI_API_KEY:
         raise GeminiNotConfigured("GEMINI_API_KEY is not configured")
 
@@ -95,6 +101,17 @@ def run_chart_analysis(
         parts.append(
             "Analyze the attached chart screenshot. Read actual price levels "
             "from the chart axes; do not guess levels the chart does not show."
+        )
+        if price_context:
+            parts.append(
+                "Live OHLC candles from the market data feed (most recent last) "
+                f"— cross-check your levels against the latest close:\n{price_context}"
+            )
+    elif price_context:
+        parts.append(
+            "Live OHLC candles from the market data feed (most recent last). "
+            "Base your structure read and ALL price levels on this data — the "
+            "last row's close is the current price:\n" + price_context
         )
     else:
         parts.append(
@@ -136,7 +153,7 @@ def run_chart_analysis(
     reasoning = [str(item) for item in reasoning][:8]
 
     risk_warning = data.get("risk_warning")
-    if not image_bytes:
+    if not image_bytes and not price_context:
         confidence = min(confidence, TEXT_ONLY_CONFIDENCE_CAP)
         no_data_note = (
             "Generated without a chart image or live market data - verify all "
