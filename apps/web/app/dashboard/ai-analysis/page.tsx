@@ -29,6 +29,17 @@ type Analysis = {
 
 const timeframes = ['M5', 'M15', 'M30', 'H1', 'H4', 'D1', 'W1']
 
+const symbolGroups: { label: string; symbols: string[] }[] = [
+  { label: 'Forex majors', symbols: ['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'NZDUSD', 'USDCAD'] },
+  { label: 'Forex crosses', symbols: ['EURGBP', 'EURJPY', 'GBPJPY', 'AUDJPY', 'CADJPY', 'CHFJPY', 'EURAUD', 'EURCHF', 'GBPAUD', 'GBPCAD', 'AUDNZD', 'NZDJPY'] },
+  { label: 'Metals & energy', symbols: ['XAUUSD', 'XAGUSD', 'XPTUSD', 'USOIL', 'UKOIL', 'NATGAS'] },
+  { label: 'Indices', symbols: ['US30', 'US100', 'US500', 'GER40', 'UK100', 'FRA40', 'JPN225', 'AUS200', 'HK50'] },
+  { label: 'Crypto', symbols: ['BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD', 'BNBUSD', 'DOGEUSD'] },
+  { label: 'Synthetics (Deriv)', symbols: ['V10', 'V25', 'V50', 'V75', 'V100', 'BOOM1000', 'CRASH1000', 'STEP'] },
+]
+
+const CUSTOM_SYMBOL = '__custom__'
+
 function signalTone(signal: string) {
   if (signal === 'buy') return 'bg-[#f0fdf4] text-[#15803d]'
   if (signal === 'sell') return 'bg-[#fef2f2] text-[#b91c1c]'
@@ -43,6 +54,7 @@ function biasTone(bias: string) {
 
 export default function AIAnalysisPage() {
   const [symbol, setSymbol] = useState('EURUSD')
+  const [customSymbol, setCustomSymbol] = useState('')
   const [timeframe, setTimeframe] = useState('H1')
   const [prompt, setPrompt] = useState('')
   const [file, setFile] = useState<File | null>(null)
@@ -72,6 +84,11 @@ export default function AIAnalysisPage() {
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
     setError('')
+    const effectiveSymbol = symbol === CUSTOM_SYMBOL ? customSymbol.trim() : symbol
+    if (!effectiveSymbol) {
+      setError('Enter a symbol to analyze')
+      return
+    }
     setLoading(true)
     setResult(null)
     try {
@@ -79,14 +96,14 @@ export default function AIAnalysisPage() {
       if (file) {
         const body = new FormData()
         body.append('file', file)
-        body.append('symbol', symbol)
+        body.append('symbol', effectiveSymbol)
         body.append('timeframe', timeframe)
         if (prompt) body.append('prompt', prompt)
         analysis = await apiRequest<Analysis>('/ai/analyze-image', { method: 'POST', body })
       } else {
         analysis = await apiRequest<Analysis>('/ai/analyze', {
           method: 'POST',
-          body: JSON.stringify({ symbol, timeframe, prompt: prompt || null }),
+          body: JSON.stringify({ symbol: effectiveSymbol, timeframe, prompt: prompt || null }),
         })
       }
       setResult(analysis)
@@ -118,7 +135,14 @@ export default function AIAnalysisPage() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label htmlFor="symbol" className="label">Symbol</label>
-              <input id="symbol" className="input-base uppercase" value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())} required maxLength={20} placeholder="EURUSD" />
+              <select id="symbol" className="input-base" value={symbol} onChange={(e) => setSymbol(e.target.value)}>
+                {symbolGroups.map((group) => (
+                  <optgroup key={group.label} label={group.label}>
+                    {group.symbols.map((item) => <option key={item} value={item}>{item}</option>)}
+                  </optgroup>
+                ))}
+                <option value={CUSTOM_SYMBOL}>Other symbol…</option>
+              </select>
             </div>
             <div>
               <label htmlFor="timeframe" className="label">Timeframe</label>
@@ -127,6 +151,13 @@ export default function AIAnalysisPage() {
               </select>
             </div>
           </div>
+
+          {symbol === CUSTOM_SYMBOL && (
+            <div>
+              <label htmlFor="custom-symbol" className="label">Custom symbol</label>
+              <input id="custom-symbol" className="input-base uppercase" value={customSymbol} onChange={(e) => setCustomSymbol(e.target.value.toUpperCase())} required maxLength={20} placeholder="e.g. USDZAR" />
+            </div>
+          )}
 
           <div>
             <span className="label">Chart screenshot (recommended)</span>
