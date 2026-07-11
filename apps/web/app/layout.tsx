@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'AroTrade AI',
+  title: 'AroTrader AI',
   description: 'AI-Powered Trading Intelligence',
 }
 

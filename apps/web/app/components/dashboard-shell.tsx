@@ -142,9 +142,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     <div className="flex h-full flex-col bg-white">
       <div className="flex h-[72px] items-center justify-between border-b border-slate-200 px-5">
         <Link href="/dashboard" className="flex items-center gap-3" onClick={() => setIsMobileNavOpen(false)}>
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#2563eb] text-sm font-black text-white">AT</span>
+          <img src="/logo.svg" alt="AroTrader logo" className="h-9 w-9" />
           <span>
-            <span className="block text-sm font-bold text-slate-950">AroTrade</span>
+            <span className="block text-sm font-bold text-slate-950">AroTrader</span>
             <span className="block text-[11px] font-medium text-slate-500">by AROFi</span>
           </span>
         </Link>
@@ -212,7 +212,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
             </button>
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-slate-900">{activePage}</p>
-              <p className="hidden text-xs text-slate-500 sm:block">AroTrade workspace</p>
+              <p className="hidden text-xs text-slate-500 sm:block">AroTrader workspace</p>
             </div>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
@@ -274,7 +274,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
         <footer className="border-t border-slate-200 bg-white px-4 py-4 text-xs text-slate-500 sm:px-6 lg:px-8">
           <div className="mx-auto flex max-w-[1600px] flex-col justify-between gap-1 sm:flex-row sm:items-center">
-            <span>© {new Date().getFullYear()} AROFi. AroTrade is operating in paper mode.</span>
+            <span>© {new Date().getFullYear()} AROFi. AroTrader is operating in paper mode.</span>
             <span>Live execution unlocks when a broker adapter is connected.</span>
           </div>
         </footer>

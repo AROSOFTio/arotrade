@@ -84,9 +84,9 @@ export default function HomePage() {
       <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/90 backdrop-blur">
         <nav className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-4 sm:px-6" aria-label="Main">
           <Link href="/" className="flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#2563eb] text-sm font-black text-white">AT</span>
+            <img src="/logo.svg" alt="AroTrader logo" className="h-9 w-9" />
             <span>
-              <span className="block text-sm font-bold leading-tight text-slate-950">AroTrade</span>
+              <span className="block text-sm font-bold leading-tight text-slate-950">AroTrader</span>
               <span className="block text-[11px] font-medium leading-tight text-slate-500">by AROFi</span>
             </span>
           </Link>
@@ -117,7 +117,7 @@ export default function HomePage() {
               Trade smarter with AI — without risking real money
             </h1>
             <p className="mt-5 max-w-xl text-lg leading-8 text-slate-600">
-              AroTrade analyzes markets with AI, generates signals with clear entries and exits, and lets you prove every
+              AroTrader analyzes markets with AI, generates signals with clear entries and exits, and lets you prove every
               strategy in a realistic paper-trading workspace before a single real dollar moves.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-4">
@@ -228,7 +228,7 @@ export default function HomePage() {
               </span>
               <h2 className="mt-4 text-3xl font-bold tracking-tight text-slate-950">Built safety-first</h2>
               <p className="mt-3 max-w-xl text-base leading-7 text-slate-600">
-                Trading tools should protect you from your worst day, not amplify it. AroTrade enforces guardrails at the
+                Trading tools should protect you from your worst day, not amplify it. AroTrader enforces guardrails at the
                 platform level — they are not optional settings you can forget to turn on.
               </p>
             </div>
@@ -282,9 +282,9 @@ export default function HomePage() {
         <div className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6">
           <div className="flex flex-col items-start justify-between gap-6 sm:flex-row sm:items-center">
             <div className="flex items-center gap-3">
-              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#2563eb] text-sm font-black text-white">AT</span>
+              <img src="/logo.svg" alt="AroTrader logo" className="h-9 w-9" />
               <span>
-                <span className="block text-sm font-bold leading-tight text-slate-950">AroTrade</span>
+                <span className="block text-sm font-bold leading-tight text-slate-950">AroTrader</span>
                 <span className="block text-[11px] font-medium leading-tight text-slate-500">by AROFi</span>
               </span>
             </div>
@@ -294,7 +294,7 @@ export default function HomePage() {
             </div>
           </div>
           <p className="mt-8 max-w-3xl text-xs leading-5 text-slate-500">
-            Trading involves substantial risk of loss and is not suitable for every investor. AroTrade provides analysis and
+            Trading involves substantial risk of loss and is not suitable for every investor. AroTrader provides analysis and
             simulated trading tools for educational purposes; nothing on this platform constitutes financial advice.
           </p>
           <p className="mt-3 text-xs text-slate-400">© {new Date().getFullYear()} AROFi. All rights reserved.</p>

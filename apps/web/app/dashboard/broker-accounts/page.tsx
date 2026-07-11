@@ -89,7 +89,7 @@ export default function BrokerAccountsPage() {
             <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-[#2563eb]"><Link2 size={18} aria-hidden="true" /></span>
             <div>
               <h2 className="text-sm font-semibold text-slate-900">Connect MT5 / Exness account</h2>
-              <p className="mt-0.5 text-xs text-slate-500">Credentials go straight to MetaApi — never stored on AroTrade.</p>
+              <p className="mt-0.5 text-xs text-slate-500">Credentials go straight to MetaApi — never stored on AroTrader.</p>
             </div>
           </div>
           <div className="mt-5">
