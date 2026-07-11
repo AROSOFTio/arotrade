@@ -69,6 +69,10 @@ def create_account(name: str, login: str, password: str, server: str, platform: 
     return response.json()
 
 
+def account_identifier(account: dict) -> Optional[str]:
+    return account.get("id") or account.get("_id")
+
+
 def get_account(metaapi_account_id: str) -> dict:
     response = _request("GET", f"{PROVISIONING_BASE}/users/current/accounts/{metaapi_account_id}")
     return response.json()

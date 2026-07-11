@@ -106,6 +106,13 @@ async def connect_mt5_account(
     except metaapi.MetaApiError as exc:
         raise _metaapi_error(exc)
 
+    metaapi_account_id = metaapi.account_identifier(created)
+    if not metaapi_account_id:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="MetaApi created the account but did not return an account id"
+        )
+
     account = models.BrokerAccount(
         user_id=current_user["user_id"],
         broker="exness-mt5" if "exness" in payload.server.lower() else f"{payload.platform}-broker",
@@ -116,7 +123,7 @@ async def connect_mt5_account(
         name=payload.name.strip(),
         server=payload.server.strip(),
         platform=payload.platform,
-        metaapi_account_id=created.get("id"),
+        metaapi_account_id=metaapi_account_id,
         connection_state="undeployed",
     )
     db.add(account)

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field, model_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
 from enum import Enum
@@ -84,6 +84,14 @@ class MT5ConnectRequest(BaseModel):
     server: str = Field(min_length=3, max_length=100)
     platform: Literal["mt4", "mt5"] = "mt5"
     account_type: Literal["demo", "live"] = "demo"
+
+    @field_validator("login")
+    @classmethod
+    def validate_mt_login(cls, value: str) -> str:
+        login = value.strip()
+        if not login.isdigit():
+            raise ValueError("MT5 login must be the numeric account number from your broker, not an email address")
+        return login
 
 
 class SignalLiveExecutionRequest(BaseModel):

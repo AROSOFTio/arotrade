@@ -99,7 +99,8 @@ export default function BrokerAccountsPage() {
           <div className="mt-4 grid grid-cols-2 gap-4">
             <div>
               <label htmlFor="acc-login" className="label">MT5 login (account no.)</label>
-              <input id="acc-login" className="input-base" value={form.login} onChange={(e) => setForm((c) => ({ ...c, login: e.target.value }))} required inputMode="numeric" />
+              <input id="acc-login" className="input-base" value={form.login} onChange={(e) => setForm((c) => ({ ...c, login: e.target.value.replace(/\D/g, '') }))} required inputMode="numeric" pattern="[0-9]*" placeholder="134478618" title="Use the MT5 login/account number, not your Exness email address." />
+              <p className="mt-1.5 text-xs text-slate-500">Use the MT5 login/account number, not your Exness email.</p>
             </div>
             <div>
               <label htmlFor="acc-platform" className="label">Platform</label>
