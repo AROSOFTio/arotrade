@@ -67,6 +67,39 @@ class BrokerAccountResponse(BaseModel):
     currency: str
     is_active: bool
     created_at: datetime
+    name: Optional[str] = None
+    server: Optional[str] = None
+    platform: Optional[str] = None
+    connection_state: Optional[str] = None
+    metaapi_account_id: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class MT5ConnectRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+    login: str = Field(min_length=3, max_length=50)
+    password: str = Field(min_length=4, max_length=128)
+    server: str = Field(min_length=3, max_length=100)
+    platform: Literal["mt4", "mt5"] = "mt5"
+    account_type: Literal["demo", "live"] = "demo"
+
+
+class SignalLiveExecutionRequest(BaseModel):
+    volume: float = Field(gt=0)
+    broker_account_id: int
+    notes: Optional[str] = None
+
+
+class NotificationResponse(BaseModel):
+    id: int
+    title: str
+    body: Optional[str]
+    category: str
+    link: Optional[str]
+    is_read: bool
+    created_at: datetime
 
     class Config:
         from_attributes = True

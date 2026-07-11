@@ -53,6 +53,17 @@ class Settings(BaseSettings):
     DERIV_APP_ID: str = ""
     DERIV_API_TOKEN_DEMO: str = ""
     DERIV_API_TOKEN_LIVE: str = ""
+    METAAPI_TOKEN: str = ""
+    METAAPI_REGION: str = "london"
+    MAX_LIVE_ORDER_VOLUME: float = 1.0
+
+    # Email (optional - notifications are skipped if SMTP_HOST is empty)
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = "noreply@arotrade.com"
+    SMTP_FROM_NAME: str = "AroTrade AI"
     ENABLE_LIVE_TRADING: bool = False
     PAPER_TRADING_ENABLED: bool = True
     MIN_SIGNAL_CONFIDENCE: int = 70

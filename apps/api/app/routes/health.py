@@ -50,5 +50,5 @@ async def execution_health():
         "paper_trading": settings.PAPER_TRADING_ENABLED,
         "live_trading": settings.ENABLE_LIVE_TRADING,
         "deriv_available": deriv_available,
-        "live_broker_adapter": False,
+        "live_broker_adapter": bool(settings.METAAPI_TOKEN),
     }

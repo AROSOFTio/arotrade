@@ -115,7 +115,27 @@ class BrokerAccount(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
 
+    # MT5-via-MetaApi connectivity
+    name = Column(String(100), nullable=True)
+    server = Column(String(100), nullable=True)
+    platform = Column(String(10), nullable=True)  # mt4 / mt5
+    metaapi_account_id = Column(String(64), nullable=True, unique=True)
+    connection_state = Column(String(30), nullable=True)  # undeployed, deploying, deployed, undeploying
+
     user = relationship("User", back_populates="broker_accounts")
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    body = Column(Text, nullable=True)
+    category = Column(String(30), default="general")  # signal, trade, system
+    link = Column(String(255), nullable=True)
+    is_read = Column(Boolean, default=False, index=True)
+    created_at = Column(DateTime, server_default=func.now(), index=True)
 
 
 class Symbol(Base):

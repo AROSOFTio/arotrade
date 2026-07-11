@@ -32,6 +32,16 @@ type User = {
   enable_live_trading: boolean
 }
 
+type Notification = {
+  id: number
+  title: string
+  body?: string | null
+  category: string
+  link?: string | null
+  is_read: boolean
+  created_at: string
+}
+
 type NavigationItem = {
   href: string
   label: string
@@ -62,6 +72,30 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false)
+  const [notifications, setNotifications] = useState<Notification[]>([])
+  const [unreadCount, setUnreadCount] = useState(0)
+  const [isBellOpen, setIsBellOpen] = useState(false)
+
+  const refreshNotifications = () => {
+    apiRequest<Notification[]>('/notifications?limit=15').then(setNotifications).catch(() => undefined)
+    apiRequest<{ unread: number }>('/notifications/unread-count').then((r) => setUnreadCount(r.unread)).catch(() => undefined)
+  }
+
+  useEffect(() => {
+    refreshNotifications()
+    const interval = window.setInterval(refreshNotifications, 60000)
+    return () => window.clearInterval(interval)
+  }, [])
+
+  const markAllRead = async () => {
+    try {
+      await apiRequest('/notifications/read-all', { method: 'POST' })
+      setUnreadCount(0)
+      setNotifications((current) => current.map((n) => ({ ...n, is_read: true })))
+    } catch {
+      // non-fatal
+    }
+  }
 
   useEffect(() => {
     if (!window.localStorage.getItem('access_token')) {
@@ -181,9 +215,52 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
             <span className="hidden rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-[#1d4ed8] sm:inline-flex">Demo mode</span>
-            <button type="button" className="icon-button" title="Notifications" aria-label="Notifications">
-              <Bell size={18} aria-hidden="true" />
-            </button>
+            <div className="relative">
+              <button
+                type="button"
+                className="icon-button relative"
+                title="Notifications"
+                aria-label={unreadCount > 0 ? `Notifications (${unreadCount} unread)` : 'Notifications'}
+                onClick={() => { setIsBellOpen((open) => !open); if (!isBellOpen) refreshNotifications() }}
+              >
+                <Bell size={18} aria-hidden="true" />
+                {unreadCount > 0 && (
+                  <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
+              </button>
+              {isBellOpen && (
+                <>
+                  <button type="button" className="fixed inset-0 z-40 cursor-default" onClick={() => setIsBellOpen(false)} aria-label="Close notifications" tabIndex={-1} />
+                  <div className="absolute right-0 z-50 mt-2 w-[min(22rem,90vw)] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl">
+                    <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                      <h3 className="text-sm font-semibold text-slate-900">Notifications</h3>
+                      {unreadCount > 0 && (
+                        <button type="button" onClick={() => void markAllRead()} className="text-xs font-semibold text-[#2563eb] hover:text-[#1d4ed8]">Mark all read</button>
+                      )}
+                    </div>
+                    <div className="max-h-96 overflow-y-auto">
+                      {notifications.length === 0 ? (
+                        <p className="px-4 py-8 text-center text-sm text-slate-500">No notifications yet.</p>
+                      ) : (
+                        notifications.map((notification) => (
+                          <Link
+                            key={notification.id}
+                            href={notification.link || '/dashboard'}
+                            onClick={() => setIsBellOpen(false)}
+                            className={`block border-b border-slate-50 px-4 py-3 transition-colors hover:bg-slate-50 ${notification.is_read ? '' : 'bg-blue-50/50'}`}
+                          >
+                            <p className="text-sm font-semibold text-slate-900">{notification.title}</p>
+                            {notification.body && <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-slate-500">{notification.body}</p>}
+                          </Link>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
             <div className="flex items-center gap-2 border-l border-slate-200 pl-2 sm:pl-3">
               <span className="hidden max-w-40 truncate text-right text-sm font-medium text-slate-700 sm:block">{user?.full_name || user?.email}</span>
               <span className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white" title={user?.email}>{initials}</span>

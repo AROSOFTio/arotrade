@@ -1,9 +1,13 @@
+from uuid import uuid4
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app import models, schemas
 from app.database import get_db
 from app.config import settings
+from app.services import metaapi
 from app.services.execution import PaperBroker, evaluate_signal_for_execution, utc_now
+from app.services.notify import notify_signal_event
 
 router = APIRouter()
 
@@ -34,6 +38,10 @@ async def create_signal(
     )
 
     db.add(signal)
+    db.flush()
+    user = db.query(models.User).filter(models.User.id == current_user["user_id"]).first()
+    if user:
+        notify_signal_event(db, user, signal, "created")
     db.commit()
     db.refresh(signal)
 
@@ -116,6 +124,10 @@ async def approve_signal(
 
     signal.status = models.SignalStatus.APPROVED
     signal.approved_at = utc_now()
+
+    user = db.query(models.User).filter(models.User.id == current_user["user_id"]).first()
+    if user:
+        notify_signal_event(db, user, signal, "approved")
 
     db.commit()
     db.refresh(signal)
@@ -259,6 +271,143 @@ async def execute_signal_demo(
             "simulated": True,
         },
     )
+    db.commit()
+    db.refresh(trade)
+    return trade
+
+
+@router.post("/{signal_id}/execute-live", response_model=schemas.TradeResponse)
+async def execute_signal_live(
+    signal_id: int,
+    request: schemas.SignalLiveExecutionRequest,
+    current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Send an approved signal to the user's connected MT5 account as a real order.
+
+    Gates, in order: user opted into live trading and accepted the disclaimer,
+    signal is approved and unexpired with a stop loss, volume within platform
+    cap, no open trade for this signal, open-trade count below the user limit,
+    and the broker account is a deployed MetaApi connection owned by the user.
+    """
+    signal = _get_user_signal(signal_id, current_user["user_id"], db)
+    user = db.query(models.User).filter(models.User.id == current_user["user_id"]).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if not user.enable_live_trading or not user.accepted_live_disclaimer:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Enable live trading in Settings (and accept the risk disclaimer) first"
+        )
+
+    signal_status = getattr(signal.status, "value", signal.status)
+    if signal_status != "approved":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only approved signals can be executed live")
+    if signal.valid_until is not None and signal.valid_until <= utc_now():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Signal has expired")
+    if not signal.stop_loss or signal.stop_loss <= 0:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No stop loss - live execution refused")
+    if request.volume > settings.MAX_LIVE_ORDER_VOLUME:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Volume exceeds the platform cap of {settings.MAX_LIVE_ORDER_VOLUME} lots"
+        )
+
+    existing_trade = db.query(models.Trade).filter(
+        models.Trade.signal_id == signal.id,
+        models.Trade.status == models.TradeStatus.OPEN,
+    ).first()
+    if existing_trade:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Signal already has an open trade")
+
+    open_trade_count = db.query(models.Trade).filter(
+        models.Trade.user_id == user.id,
+        models.Trade.status == models.TradeStatus.OPEN,
+    ).count()
+    if open_trade_count >= user.max_open_trades:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Maximum open-trade limit reached")
+
+    account = db.query(models.BrokerAccount).filter(
+        models.BrokerAccount.id == request.broker_account_id,
+        models.BrokerAccount.user_id == user.id,
+        models.BrokerAccount.is_active == True,  # noqa: E712
+    ).first()
+    if not account or not account.metaapi_account_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connected broker account not found")
+    if account.connection_state != "deployed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Broker account is not deployed - deploy it on the Broker accounts page first"
+        )
+
+    client_order_id = f"arotrade-live-{uuid4()}"
+    try:
+        order_result = metaapi.place_market_order(
+            metaapi_account_id=account.metaapi_account_id,
+            symbol=signal.symbol,
+            direction=signal.signal_type,
+            volume=request.volume,
+            stop_loss=signal.stop_loss,
+            take_profit=signal.take_profit_1,
+            client_id=client_order_id,
+            comment=f"AroTrade #{signal.id}",
+        )
+    except metaapi.MetaApiError as exc:
+        db.add(models.ExecutionAudit(
+            user_id=user.id,
+            signal_id=signal.id,
+            broker=account.broker,
+            mode=models.TradingMode.LIVE.value,
+            outcome="rejected",
+            reason=str(exc),
+            details={"volume": request.volume, "broker_account_id": account.id},
+        ))
+        db.commit()
+        raise HTTPException(status_code=exc.status_code if exc.status_code >= 400 else 502, detail=str(exc))
+
+    now = utc_now()
+    fill_price = float(order_result.get("openPrice") or 0) or signal.entry_min
+    trade = models.Trade(
+        user_id=user.id,
+        signal_id=signal.id,
+        symbol=signal.symbol,
+        trade_type=signal.signal_type,
+        entry_price=fill_price,
+        entry_time=now,
+        stop_loss=signal.stop_loss,
+        take_profit=signal.take_profit_1,
+        volume=request.volume,
+        notes=request.notes or signal.notes,
+        status=models.TradeStatus.OPEN,
+        mode=models.TradingMode.LIVE,
+        broker=account.broker,
+        broker_order_id=str(order_result.get("orderId") or order_result.get("positionId") or ""),
+        client_order_id=client_order_id,
+        execution_status=(order_result.get("stringCode") or "submitted").lower(),
+        submitted_at=now,
+        filled_at=now if order_result.get("openPrice") else None,
+    )
+    db.add(trade)
+    db.flush()
+
+    signal.status = models.SignalStatus.EXECUTED_LIVE
+    signal.executed_at = now
+    db.add(models.ExecutionAudit(
+        user_id=user.id,
+        signal_id=signal.id,
+        trade_id=trade.id,
+        broker=account.broker,
+        mode=models.TradingMode.LIVE.value,
+        outcome="submitted",
+        reason="Live order submitted via MetaApi",
+        details={
+            "volume": request.volume,
+            "broker_account_id": account.id,
+            "metaapi_response": order_result,
+        },
+    ))
+    notify_signal_event(db, user, signal, "executed_live")
     db.commit()
     db.refresh(trade)
     return trade
