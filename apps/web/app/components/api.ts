@@ -14,7 +14,7 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   const token = typeof window === 'undefined' ? null : window.localStorage.getItem('access_token')
   const headers = new Headers(init.headers)
 
-  if (init.body && !headers.has('Content-Type')) {
+  if (init.body && typeof init.body === 'string' && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
   if (token) {

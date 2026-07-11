@@ -3,9 +3,55 @@ from sqlalchemy.orm import Session
 from app import models, schemas
 from app.database import get_db
 from app.config import settings
-import json
+from app.services.gemini import GeminiError, GeminiNotConfigured, run_chart_analysis
 
 router = APIRouter()
+
+ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp"}
+MAX_IMAGE_BYTES = 8 * 1024 * 1024
+
+
+def _persist_analysis(db: Session, user_id: int, symbol: str, timeframe: str, prompt, result: dict) -> models.AIAnalysis:
+    analysis = models.AIAnalysis(
+        user_id=user_id,
+        symbol=symbol.upper(),
+        timeframe=timeframe,
+        prompt=prompt,
+        analysis=result.get("raw"),
+        bias=result["bias"],
+        signal=result["signal"],
+        confidence=result["confidence"],
+        entry_min=result["entry_min"],
+        entry_max=result["entry_max"],
+        stop_loss=result["stop_loss"],
+        take_profit_1=result["take_profit_1"],
+        take_profit_2=result["take_profit_2"],
+        take_profit_3=result["take_profit_3"],
+        risk_reward=result["risk_reward"],
+        reasoning=result["reasoning"],
+        invalidation=result["invalidation"],
+        news_warning=result["news_warning"],
+        risk_warning=result["risk_warning"],
+    )
+    db.add(analysis)
+    db.commit()
+    db.refresh(analysis)
+    return analysis
+
+
+def _run_or_raise(**kwargs) -> dict:
+    try:
+        return run_chart_analysis(**kwargs)
+    except GeminiNotConfigured:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI service not configured"
+        )
+    except GeminiError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"AI analysis failed: {exc}"
+        )
 
 
 @router.post("/analyze", response_model=schemas.AIAnalysisResponse)
@@ -14,45 +60,51 @@ async def analyze_chart(
     current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Analyze a trading chart using Gemini AI."""
-    if not settings.GEMINI_API_KEY:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="AI service not configured"
-        )
-
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Gemini chart analysis is not connected yet. No generated analysis can be used as a trading signal."
+    """Analyze a market using Gemini AI (no chart image: qualitative, capped confidence)."""
+    result = _run_or_raise(
+        symbol=request.symbol,
+        timeframe=request.timeframe,
+        prompt=request.prompt,
     )
+    return _persist_analysis(db, current_user["user_id"], request.symbol, request.timeframe, request.prompt, result)
 
 
-@router.post("/analyze-image")
+@router.post("/analyze-image", response_model=schemas.AIAnalysisResponse)
 async def analyze_image_upload(
     file: UploadFile = File(...),
     symbol: str = Form(...),
     timeframe: str = Form(...),
-    prompt: str = Form(default="Analyze this chart"),
+    prompt: str = Form(default=""),
     current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Analyze an uploaded chart image."""
-    if not settings.GEMINI_API_KEY:
+    """Analyze an uploaded chart screenshot with Gemini vision."""
+    if file.content_type not in ALLOWED_IMAGE_TYPES:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="AI service not configured"
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Upload a PNG, JPEG or WebP chart screenshot"
         )
 
-    # TODO: Save uploaded image and process
-    # For now, call analyze endpoint with placeholder
-    request = schemas.AIAnalysisRequest(
+    image_bytes = await file.read()
+    if len(image_bytes) > MAX_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Chart image must be 8 MB or smaller"
+        )
+    if not image_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file is empty"
+        )
+
+    result = _run_or_raise(
         symbol=symbol,
         timeframe=timeframe,
-        image_url="",
-        prompt=prompt
+        prompt=prompt or None,
+        image_bytes=image_bytes,
+        image_mime=file.content_type,
     )
-
-    return await analyze_chart(request, current_user, db)
+    return _persist_analysis(db, current_user["user_id"], symbol, timeframe, prompt or None, result)
 
 
 @router.get("/analyses")
@@ -65,7 +117,7 @@ async def list_analyses(
     """List user's AI analyses."""
     analyses = db.query(models.AIAnalysis).filter(
         models.AIAnalysis.user_id == current_user["user_id"]
-    ).offset(skip).limit(limit).all()
+    ).order_by(models.AIAnalysis.created_at.desc()).offset(skip).limit(limit).all()
 
     return analyses
 

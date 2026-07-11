@@ -7,6 +7,7 @@ import {
   Bell,
   BookOpen,
   Bot,
+  Calculator,
   CandlestickChart,
   Landmark,
   LayoutDashboard,
@@ -45,6 +46,7 @@ const navigation: NavigationItem[] = [
   { href: '/dashboard/backtesting', label: 'Backtesting', icon: LineChart },
   { href: '/dashboard/ai-analysis', label: 'AI analysis', icon: Bot },
   { href: '/dashboard/journal', label: 'Journal', icon: BookOpen },
+  { href: '/dashboard/calculator', label: 'Position size', icon: Calculator },
   { href: '/dashboard/risk', label: 'Risk controls', icon: ShieldCheck },
   { href: '/dashboard/broker-accounts', label: 'Demo accounts', icon: Landmark },
   { href: '/dashboard/settings', label: 'Settings', icon: Settings2 },
@@ -194,7 +196,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
         <footer className="border-t border-slate-200 bg-white px-4 py-4 text-xs text-slate-500 sm:px-6 lg:px-8">
           <div className="mx-auto flex max-w-[1600px] flex-col justify-between gap-1 sm:flex-row sm:items-center">
             <span>© {new Date().getFullYear()} AROFi. AroTrade is operating in paper mode.</span>
-            <span>Real broker execution remains locked.</span>
+            <span>Live execution unlocks when a broker adapter is connected.</span>
           </div>
         </footer>
       </div>

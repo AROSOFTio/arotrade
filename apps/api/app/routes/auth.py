@@ -167,6 +167,50 @@ async def update_current_user_settings(
     return user
 
 
+@router.patch("/me/live-trading", response_model=schemas.UserResponse)
+async def update_live_trading_preference(
+    payload: schemas.LiveTradingUpdate,
+    current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Let the signed-in user opt in or out of live trading themselves.
+
+    Opting in requires explicitly accepting the risk disclaimer. Note that a
+    broker adapter must also be connected before live orders can flow.
+    """
+    user = db.query(models.User).filter(
+        models.User.id == current_user["user_id"]
+    ).first()
+
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if payload.enable and not payload.accept_risk_disclaimer:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You must accept the live-trading risk disclaimer to enable live trading"
+        )
+
+    user.enable_live_trading = payload.enable
+    if payload.enable:
+        user.accepted_live_disclaimer = True
+
+    audit = models.AuditLog(
+        user_id=user.id,
+        action="self_service_live_trading",
+        resource="user",
+        resource_id=user.id,
+        changes={
+            "enable_live_trading": payload.enable,
+            "accepted_live_disclaimer": bool(payload.enable),
+        }
+    )
+    db.add(audit)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 @router.post("/logout")
 async def logout(current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user)):
     """Logout user."""

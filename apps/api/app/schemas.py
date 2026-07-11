@@ -46,6 +46,11 @@ class UserSettingsUpdate(BaseModel):
     max_open_trades: Optional[int] = Field(default=None, ge=1, le=20)
 
 
+class LiveTradingUpdate(BaseModel):
+    enable: bool
+    accept_risk_disclaimer: bool = False
+
+
 class BrokerAccountCreate(BaseModel):
     broker: str = Field(min_length=2, max_length=50)
     account_id: str = Field(min_length=2, max_length=255)

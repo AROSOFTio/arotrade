@@ -48,7 +48,7 @@ async def execution_health():
     return {
         "status": "paper_ready" if settings.PAPER_TRADING_ENABLED else "disabled",
         "paper_trading": settings.PAPER_TRADING_ENABLED,
-        "live_trading": False,
+        "live_trading": settings.ENABLE_LIVE_TRADING,
         "deriv_available": deriv_available,
         "live_broker_adapter": False,
     }
