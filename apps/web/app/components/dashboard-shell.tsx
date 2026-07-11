@@ -142,7 +142,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     <div className="flex h-full flex-col bg-white">
       <div className="flex h-[72px] items-center justify-between border-b border-slate-200 px-5">
         <Link href="/dashboard" className="flex items-center gap-3" onClick={() => setIsMobileNavOpen(false)}>
-          <img src="/logo.svg" alt="AroTrader logo" className="h-9 w-9" />
+          <img src="/logo.png" alt="AroTrader logo" className="h-9 w-9" />
           <span>
             <span className="block text-sm font-bold text-slate-950">AroTrader</span>
             <span className="block text-[11px] font-medium text-slate-500">by AROFi</span>

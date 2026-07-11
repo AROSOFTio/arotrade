@@ -84,7 +84,7 @@ export default function HomePage() {
       <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/90 backdrop-blur">
         <nav className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-4 sm:px-6" aria-label="Main">
           <Link href="/" className="flex items-center gap-3">
-            <img src="/logo.svg" alt="AroTrader logo" className="h-9 w-9" />
+            <img src="/logo.png" alt="AroTrader logo" className="h-9 w-9" />
             <span>
               <span className="block text-sm font-bold leading-tight text-slate-950">AroTrader</span>
               <span className="block text-[11px] font-medium leading-tight text-slate-500">by AROFi</span>
@@ -282,7 +282,7 @@ export default function HomePage() {
         <div className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6">
           <div className="flex flex-col items-start justify-between gap-6 sm:flex-row sm:items-center">
             <div className="flex items-center gap-3">
-              <img src="/logo.svg" alt="AroTrader logo" className="h-9 w-9" />
+              <img src="/logo.png" alt="AroTrader logo" className="h-9 w-9" />
               <span>
                 <span className="block text-sm font-bold leading-tight text-slate-950">AroTrader</span>
                 <span className="block text-[11px] font-medium leading-tight text-slate-500">by AROFi</span>
