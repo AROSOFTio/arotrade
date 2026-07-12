@@ -366,6 +366,51 @@ def get_history_orders(
 # Order execution
 # ---------------------------------------------------------------------------
 
+SUCCESS_TRADE_STRING_CODES = {
+    "TRADE_RETCODE_PLACED",
+    "TRADE_RETCODE_DONE",
+    "TRADE_RETCODE_DONE_PARTIAL",
+    "TRADE_RETCODE_NO_CHANGES",
+}
+
+SUCCESS_TRADE_NUMERIC_CODES = {10008, 10009, 10010, 10025}
+
+
+def validate_trade_response(
+    response: dict,
+    *,
+    require_trade_reference: bool = True,
+) -> dict:
+    """Accept only explicit MT5 success trade responses."""
+    if not isinstance(response, dict):
+        raise MetaApiError("Broker returned an invalid trade response", 502)
+
+    string_code = response.get("stringCode")
+    numeric_code = response.get("numericCode")
+    message = response.get("message") or response.get("error") or "No broker message"
+
+    if string_code and string_code not in SUCCESS_TRADE_STRING_CODES:
+        raise MetaApiError(f"Broker rejected trade ({string_code}): {message}", 400)
+
+    if numeric_code is not None:
+        try:
+            parsed_code = int(numeric_code)
+        except (TypeError, ValueError) as exc:
+            raise MetaApiError(f"Broker returned an invalid numeric code: {numeric_code}", 502) from exc
+        if parsed_code not in SUCCESS_TRADE_NUMERIC_CODES:
+            raise MetaApiError(f"Broker rejected trade ({parsed_code}): {message}", 400)
+
+    if string_code is None and numeric_code is None:
+        raise MetaApiError("Broker response did not include an MT5 success code", 502)
+
+    if require_trade_reference and not (
+        response.get("orderId") or response.get("positionId") or response.get("dealId")
+    ):
+        raise MetaApiError("Broker accepted the request but returned no order, deal, or position reference", 502)
+
+    return response
+
+
 def place_market_order(
     metaapi_account_id: str,
     symbol: str,
@@ -410,7 +455,7 @@ def place_market_order(
         payload,
         timeout=60.0,
     )
-    return response.json()
+    return validate_trade_response(response.json(), require_trade_reference=True)
 
 
 def close_position(
@@ -438,7 +483,7 @@ def close_position(
         payload,
         timeout=60.0,
     )
-    return response.json()
+    return validate_trade_response(response.json(), require_trade_reference=False)
 
 
 def modify_position(
@@ -463,4 +508,4 @@ def modify_position(
         payload,
         timeout=60.0,
     )
-    return response.json()
+    return validate_trade_response(response.json(), require_trade_reference=False)

@@ -97,8 +97,39 @@ async def close_trade(
             raise HTTPException(status_code=400, detail="Broker account mapping missing")
 
         from app.services import metaapi_gateway as metaapi
+        from app.services.execution import _find_confirmed_position
         try:
-            res = metaapi.close_position(account.metaapi_account_id, trade.broker_position_id)
+            position_id = trade.broker_position_id
+            if not position_id or (
+                trade.broker_order_id and str(position_id) == str(trade.broker_order_id)
+            ):
+                confirmed = _find_confirmed_position(
+                    account,
+                    client_order_id=trade.client_order_id or "",
+                    comment=f"AT-{trade.signal_id}" if trade.signal_id else "",
+                    symbol=trade.broker_symbol or trade.symbol,
+                    direction=trade.trade_type,
+                    volume=float(trade.actual_volume or trade.volume or 0),
+                )
+                if confirmed:
+                    trade.broker_order_id = confirmed[0] or trade.broker_order_id
+                    trade.broker_position_id = confirmed[1]
+                    trade.broker_deal_id = confirmed[2] or trade.broker_deal_id
+                    position_id = trade.broker_position_id
+                    db.commit()
+
+            if not position_id or (
+                trade.broker_order_id and str(position_id) == str(trade.broker_order_id)
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "This broker trade does not have a confirmed MT5 position ID yet. "
+                        "Refresh positions or wait for reconciliation before closing it here."
+                    ),
+                )
+
+            res = metaapi.close_position(account.metaapi_account_id, position_id)
             # Retrieve closing details
             fill_exit = float(res.get("price") or res.get("closePrice") or 0.0)
             trade.exit_price = fill_exit if fill_exit > 0 else trade.entry_price
@@ -110,6 +141,8 @@ async def close_trade(
             db.commit()
             db.refresh(trade)
             return trade
+        except HTTPException:
+            raise
         except Exception as exc:
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Failed to close MT5 position: {exc}")
 

@@ -112,7 +112,15 @@ def _scan_profile(db, profile):
             broker_symbol_map[bs.canonical_symbol] = bs.broker_symbol
 
     for symbol in symbols:
-        broker_sym = broker_symbol_map.get(symbol, symbol)
+        broker_sym = broker_symbol_map.get(symbol)
+        if not broker_sym:
+            logger.warning(
+                "Profile %d: exact broker symbol is not resolved for %s on account %s",
+                profile.id,
+                symbol,
+                profile.broker_account_id,
+            )
+            continue
 
         try:
             # Get current quote

@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import logging
 import redis
 from datetime import datetime, UTC
+from secrets import token_hex
 from typing import Optional
 from uuid import uuid4
 from sqlalchemy.orm import Session
@@ -27,8 +30,136 @@ class SignalGateResult:
     reasons: list[str]
     calculated_risk_reward: Optional[float]
 
+
+@dataclass
+class BrokerAccountMetrics:
+    balance: float
+    equity: float
+    free_margin: float
+    margin: float
+    raw: dict
+    is_simulated: bool = False
+
+
 def utc_now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+def _required_account_float(info: dict, *keys: str) -> float:
+    for key in keys:
+        value = info.get(key)
+        if value is None:
+            continue
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            continue
+        return parsed
+    raise ExecutionError(f"MetaApi account information is missing {keys[0]}.")
+
+
+def get_broker_account_metrics(account: models.BrokerAccount, execution_mode: str) -> BrokerAccountMetrics:
+    """
+    Return account metrics for sizing.
+
+    Broker-demo and live modes must use actual MT5 values. Paper mode may fall
+    back to the configured simulation balance if account information is not
+    available, because no broker order is submitted.
+    """
+    try:
+        info = metaapi.get_account_information(account.metaapi_account_id)
+    except Exception as exc:
+        if execution_mode == "paper":
+            balance = float(settings.DEMO_INITIAL_BALANCE)
+            return BrokerAccountMetrics(
+                balance=balance,
+                equity=balance,
+                free_margin=balance,
+                margin=0.0,
+                raw={"simulation_balance": balance, "reason": str(exc)},
+                is_simulated=True,
+            )
+        raise ExecutionError(f"MetaApi could not return actual account information: {exc}") from exc
+
+    return BrokerAccountMetrics(
+        balance=_required_account_float(info, "balance"),
+        equity=_required_account_float(info, "equity"),
+        free_margin=_required_account_float(info, "freeMargin", "free_margin"),
+        margin=_required_account_float(info, "margin"),
+        raw=info,
+    )
+
+
+def resolve_signal_broker_symbol(db: Session, signal: models.Signal, account: models.BrokerAccount) -> str:
+    """Resolve and persist the exact broker symbol for this account."""
+    if signal.broker_symbol:
+        return signal.broker_symbol
+
+    canonical = (signal.canonical_symbol or signal.symbol or "").upper().strip()
+    if not canonical:
+        raise ExecutionError("Signal does not include a canonical symbol to resolve.")
+
+    broker_symbol = db.query(models.BrokerSymbol).filter(
+        models.BrokerSymbol.broker_account_id == account.id,
+        models.BrokerSymbol.canonical_symbol == canonical,
+        models.BrokerSymbol.trade_allowed == True,  # noqa: E712
+    ).first()
+    if broker_symbol:
+        signal.broker_symbol = broker_symbol.broker_symbol
+        signal.canonical_symbol = broker_symbol.canonical_symbol
+        return broker_symbol.broker_symbol
+
+    try:
+        metaapi.get_symbol_specification(account.metaapi_account_id, canonical)
+    except Exception as exc:
+        raise ExecutionError(
+            f"Exact broker symbol for {canonical} is not configured for this account. "
+            "Refresh broker symbols before executing."
+        ) from exc
+
+    signal.broker_symbol = canonical
+    signal.canonical_symbol = canonical
+    return canonical
+
+
+def make_broker_client_id(signal_id: int) -> str:
+    return f"AT{signal_id:X}{token_hex(3).upper()}"
+
+
+def _find_confirmed_position(
+    account: models.BrokerAccount,
+    *,
+    client_order_id: str,
+    comment: str,
+    symbol: str,
+    direction: str,
+    volume: float,
+) -> tuple[str, str, str] | None:
+    """Locate the real broker position without inventing IDs."""
+    direction = direction.lower()
+    candidates = []
+    try:
+        candidates.extend(metaapi.get_positions(account.metaapi_account_id))
+    except Exception:
+        pass
+
+    for pos in candidates:
+        pos_text = " ".join(str(pos.get(key, "")) for key in ("clientId", "comment", "id", "positionId", "orderId"))
+        pos_symbol = str(pos.get("symbol") or "").upper()
+        pos_type = str(pos.get("type") or pos.get("positionType") or "").lower()
+        pos_volume = float(pos.get("volume") or pos.get("currentVolume") or 0)
+        matches_identity = client_order_id in pos_text or comment in pos_text
+        matches_shape = pos_symbol == symbol.upper() and direction in pos_type and abs(pos_volume - volume) < 1e-8
+        if matches_identity or matches_shape:
+            position_id = str(pos.get("id") or pos.get("positionId") or "")
+            if position_id:
+                return (
+                    str(pos.get("orderId") or ""),
+                    position_id,
+                    str(pos.get("dealId") or ""),
+                )
+
+    return None
 
 def evaluate_signal_for_execution(signal, user, open_trade_count: int, observed_price: float, now: Optional[datetime] = None) -> SignalGateResult:
     """Apply deterministic safeguards before a signal can create a paper order."""
@@ -106,7 +237,7 @@ def execute_signal_trade(
         raise ExecutionError(f"Invalid execution mode: {execution_mode}")
 
     # Acquire Redis distributed lock for the signal to prevent duplicate orders
-    lock_key = f"lock:signal:execute:{signal_id}"
+    lock_key = f"lock:signal:execute:{signal_id}:{execution_mode}"
     lock = redis_client.lock(lock_key, timeout=30)
     if not lock.acquire(blocking=True, blocking_timeout=10):
         raise ExecutionError("Could not acquire concurrent execution lock for this signal.")
@@ -139,30 +270,27 @@ def execute_signal_trade(
         existing_intent = db.query(models.ExecutionIntent).filter(
             models.ExecutionIntent.signal_id == signal_id,
             models.ExecutionIntent.execution_mode == execution_mode,
-            models.ExecutionIntent.status.in_(["pending", "submitted", "filled"]),
+            models.ExecutionIntent.status.in_(["pending", "submitted", "uncertain", "filled"]),
         ).first()
         if existing_intent:
             raise ExecutionError("Execution intent is already active for this signal.")
 
+        broker_symbol = resolve_signal_broker_symbol(db, signal, account)
+
         # Get MT5 Quote and Specifications
         try:
-            quote = metaapi.get_symbol_price(account.metaapi_account_id, signal.broker_symbol, require_fresh=True)
-            spec_dict = metaapi.get_symbol_specification(account.metaapi_account_id, signal.broker_symbol)
+            quote = metaapi.get_symbol_price(account.metaapi_account_id, broker_symbol, require_fresh=True)
+            spec_dict = metaapi.get_symbol_specification(account.metaapi_account_id, broker_symbol)
         except Exception as exc:
-            raise ExecutionError(f"Failed to fetch broker data for {signal.broker_symbol}: {exc}")
+            raise ExecutionError(f"Failed to fetch broker data for {broker_symbol}: {exc}")
 
         spec = spec_from_metaapi_specification(spec_dict)
         if not spec:
-            raise ExecutionError(f"Incomplete broker specifications for {signal.broker_symbol}.")
+            raise ExecutionError(f"Incomplete broker specifications for {broker_symbol}.")
 
-        # Retrieve Account Info from MetaApi REST/Client
-        try:
-            info = metaapi.get_account_information(account.metaapi_account_id)
-            equity = float(info.get("equity") or account.balance or 10000)
-            free_margin = float(info.get("freeMargin") or equity)
-        except Exception:
-            equity = float(account.balance or 10000)
-            free_margin = equity
+        metrics = get_broker_account_metrics(account, execution_mode)
+        equity = metrics.equity
+        free_margin = metrics.free_margin
 
         observed_price = metaapi.extract_observed_price(quote, signal.signal_type)
         if observed_price <= 0:
@@ -217,7 +345,8 @@ def execute_signal_trade(
             raise ExecutionError(f"Risk Engine rejected trade: {'; '.join(risk_result.reasons)}")
 
         # Create ExecutionIntent (idempotency guard)
-        client_order_id = f"arotrade-{execution_mode}-{uuid4()}"
+        client_order_id = make_broker_client_id(signal.id)
+        internal_execution_uuid = str(uuid4())
         intent = models.ExecutionIntent(
             user_id=user.id,
             signal_id=signal.id,
@@ -233,6 +362,13 @@ def execute_signal_trade(
             stop_loss_distance=sizing.stop_loss_distance,
             loss_per_lot=sizing.loss_per_lot,
             raw_volume=sizing.raw_volume,
+            request_payload={
+                "internal_execution_uuid": internal_execution_uuid,
+                "broker_symbol": broker_symbol,
+                "account_metrics_source": "simulation" if metrics.is_simulated else "metaapi",
+                "account_margin": metrics.margin,
+                "account_balance": metrics.balance,
+            },
             status="pending",
         )
         db.add(intent)
@@ -252,7 +388,7 @@ def execute_signal_trade(
                 signal_id=signal.id,
                 broker_account_id=account.id,
                 symbol=signal.symbol,
-                broker_symbol=signal.broker_symbol,
+                broker_symbol=broker_symbol,
                 trade_type=signal.signal_type,
                 entry_price=observed_price,
                 entry_time=utc_now(),
@@ -288,23 +424,48 @@ def execute_signal_trade(
         intent.status = "submitted"
         db.commit()
 
+        comment = f"AT-{signal.id}"
         try:
             order_result = metaapi.place_market_order(
                 metaapi_account_id=account.metaapi_account_id,
-                symbol=signal.broker_symbol,
+                symbol=broker_symbol,
                 direction=signal.signal_type,
                 volume=sizing.final_volume,
                 stop_loss=signal.stop_loss,
                 take_profit=signal.take_profit_1,
                 client_id=client_order_id,
-                comment=f"AroTrade #{signal.id}",
+                comment=comment,
             )
 
-            intent.status = "filled"
             intent.broker_order_id = str(order_result.get("orderId") or "")
-            intent.broker_position_id = str(order_result.get("positionId") or order_result.get("orderId") or "")
+            intent.broker_position_id = str(order_result.get("positionId") or "")
             intent.broker_deal_id = str(order_result.get("dealId") or "")
             intent.broker_response = order_result
+
+            if not intent.broker_position_id:
+                confirmed = _find_confirmed_position(
+                    account,
+                    client_order_id=client_order_id,
+                    comment=comment,
+                    symbol=broker_symbol,
+                    direction=signal.signal_type,
+                    volume=sizing.final_volume,
+                )
+                if confirmed:
+                    intent.broker_order_id = confirmed[0] or intent.broker_order_id
+                    intent.broker_position_id = confirmed[1]
+                    intent.broker_deal_id = confirmed[2] or intent.broker_deal_id
+
+            if not intent.broker_position_id:
+                intent.status = "submitted"
+                intent.error = (
+                    "Broker accepted the order, but MetaApi has not confirmed the "
+                    "open position ID yet. Reconciliation is pending."
+                )
+                db.commit()
+                raise ExecutionError(intent.error)
+
+            intent.status = "filled"
             db.commit()
 
             fill_price = float(order_result.get("openPrice") or observed_price)
@@ -314,7 +475,7 @@ def execute_signal_trade(
                 signal_id=signal.id,
                 broker_account_id=account.id,
                 symbol=signal.symbol,
-                broker_symbol=signal.broker_symbol,
+                broker_symbol=broker_symbol,
                 trade_type=signal.signal_type,
                 entry_price=fill_price,
                 entry_time=utc_now(),
@@ -354,28 +515,20 @@ def execute_signal_trade(
 
             logger.warning("Submission exception, querying account state to recover client ID: %s", client_order_id)
             try:
-                # 1. Query open positions
-                positions = metaapi.get_positions(account.metaapi_account_id)
-                for pos in positions:
-                    if pos.get("clientId") == client_order_id or f"AroTrade #{signal_id}" in str(pos.get("comment", "")):
-                        intent.status = "filled"
-                        intent.broker_position_id = str(pos.get("id") or pos.get("positionId") or "")
-                        intent.broker_order_id = str(pos.get("orderId") or "")
-                        intent.broker_deal_id = str(pos.get("dealId") or "")
-                        db.commit()
-                        break
-
-                if intent.status != "filled":
-                    # 2. Query history orders/deals
-                    history = metaapi.get_history_orders(account.metaapi_account_id)
-                    for order in history:
-                        if order.get("clientId") == client_order_id or f"AroTrade #{signal_id}" in str(order.get("comment", "")):
-                            intent.status = "filled"
-                            intent.broker_order_id = str(order.get("id") or "")
-                            intent.broker_position_id = str(order.get("positionId") or "")
-                            intent.broker_deal_id = str(order.get("dealId") or "")
-                            db.commit()
-                            break
+                confirmed = _find_confirmed_position(
+                    account,
+                    client_order_id=client_order_id,
+                    comment=comment,
+                    symbol=broker_symbol,
+                    direction=signal.signal_type,
+                    volume=sizing.final_volume,
+                )
+                if confirmed:
+                    intent.status = "filled"
+                    intent.broker_order_id = confirmed[0] or intent.broker_order_id
+                    intent.broker_position_id = confirmed[1]
+                    intent.broker_deal_id = confirmed[2] or intent.broker_deal_id
+                    db.commit()
 
                 if intent.status == "filled":
                     # Create the local trade record
@@ -384,7 +537,7 @@ def execute_signal_trade(
                         signal_id=signal.id,
                         broker_account_id=account.id,
                         symbol=signal.symbol,
-                        broker_symbol=signal.broker_symbol,
+                        broker_symbol=broker_symbol,
                         trade_type=signal.signal_type,
                         entry_price=observed_price,
                         entry_time=utc_now(),

@@ -6,7 +6,13 @@ from app import models, schemas
 from app.database import get_db
 from app.config import settings
 from app.services import metaapi_gateway as metaapi
-from app.services.execution import evaluate_signal_for_execution, utc_now
+from app.services.execution import (
+    ExecutionError,
+    evaluate_signal_for_execution,
+    get_broker_account_metrics,
+    resolve_signal_broker_symbol,
+    utc_now,
+)
 from app.services.notify import notify_signal_event
 from app.services import trading_control
 from app.services.position_sizing import calculate_position_size, spec_from_metaapi_specification
@@ -140,7 +146,10 @@ async def approve_signal(
     signal.approved_action = "wait_for_entry"
     signal.broker_account_id = request.broker_account_id
     signal.execution_mode = request.execution_mode
-    signal.broker_symbol = signal.broker_symbol or signal.symbol
+    try:
+        resolve_signal_broker_symbol(db, signal, account)
+    except ExecutionError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
     user = db.query(models.User).filter(models.User.id == current_user["user_id"]).first()
     if user:
@@ -191,9 +200,27 @@ async def preview_execution(
     if not user or not account:
         raise HTTPException(status_code=404, detail="User or account not found")
 
+    if signal.status == models.SignalStatus.PENDING:
+        signal.status = models.SignalStatus.APPROVED
+        signal.approved_at = utc_now()
+    elif signal.status != models.SignalStatus.APPROVED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Signal status is '{getattr(signal.status, 'value', signal.status)}' and cannot be executed",
+        )
+    signal.approved_action = "jump_in_now"
+    signal.broker_account_id = account.id
+    signal.execution_mode = request.execution_mode
+
     try:
-        quote = metaapi.get_symbol_price(account.metaapi_account_id, signal.broker_symbol or signal.symbol, require_fresh=True)
-        spec_dict = metaapi.get_symbol_specification(account.metaapi_account_id, signal.broker_symbol or signal.symbol)
+        broker_symbol = resolve_signal_broker_symbol(db, signal, account)
+        metrics = get_broker_account_metrics(account, request.execution_mode)
+    except ExecutionError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    try:
+        quote = metaapi.get_symbol_price(account.metaapi_account_id, broker_symbol, require_fresh=True)
+        spec_dict = metaapi.get_symbol_specification(account.metaapi_account_id, broker_symbol)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Failed to fetch quote/specs: {exc}")
 
@@ -206,12 +233,12 @@ async def preview_execution(
     # Sizing
     risk_percent = signal.scanner_profile.risk_percent if signal.scanner_profile else user.default_risk_percent
     sizing = calculate_position_size(
-        equity=account.balance or 10000,
+        equity=metrics.equity,
         risk_percent=risk_percent,
         entry_price=observed_price,
         stop_loss=signal.stop_loss,
         spec=spec,
-        free_margin=account.balance or 10000,
+        free_margin=metrics.free_margin,
         direction=signal.signal_type,
         platform_max_volume=settings.MAX_LIVE_ORDER_VOLUME
     )
@@ -237,16 +264,24 @@ async def preview_execution(
         quote_time_str=quote_time_str,
         open_trade_count=open_trade_count,
         daily_realized_pnl=daily_loss,
-        equity=account.balance or 10000,
-        free_margin=account.balance or 10000,
+        equity=metrics.equity,
+        free_margin=metrics.free_margin,
         is_jump_in=True,
     )
+
+    db.commit()
+    db.refresh(signal)
 
     return {
         "eligible": risk_result.approved and not sizing.blocked,
         "reasons": risk_result.reasons + ([sizing.block_reason] if sizing.blocked else []),
         "calculated_volume": sizing.final_volume,
         "observed_price": observed_price,
+        "broker_symbol": broker_symbol,
+        "account_balance": metrics.balance,
+        "account_equity": metrics.equity,
+        "account_free_margin": metrics.free_margin,
+        "account_metrics_source": "simulation" if metrics.is_simulated else "metaapi",
         "bid": quote.get("bid") or quote.get("brokerBid"),
         "ask": quote.get("ask") or quote.get("brokerAsk"),
         "spread": quote.get("spread") or 0.0,

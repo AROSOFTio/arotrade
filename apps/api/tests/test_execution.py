@@ -7,14 +7,18 @@ from types import SimpleNamespace, ModuleType
 # Setup stub config so we can import services without loading real settings
 config_module = ModuleType("app.config")
 config_module.settings = SimpleNamespace(
+    ENABLE_LIVE_TRADING=True,
     MIN_SIGNAL_CONFIDENCE=70,
     MIN_SIGNAL_RISK_REWARD=1.5,
     REDIS_URL="redis://localhost:6379/0",
     MAX_LIVE_ORDER_VOLUME=1.0,
     QUOTE_STALE_AFTER_SECONDS=10.0,
+    PAPER_TRADING_ENABLED=True,
+    DEMO_INITIAL_BALANCE=10000.0,
     APP_URL="http://localhost:3000",
     SMTP_HOST="",
 )
+config_module.DATABASE_URL = "sqlite:///:memory:"
 sys.modules.setdefault("app.config", config_module)
 
 from app.services.execution import evaluate_signal_for_execution, utc_now, execute_signal_trade
@@ -83,7 +87,12 @@ class SignalExecutionGateTests(unittest.TestCase):
         mock_meta.get_symbol_price.return_value = {"bid": 100.5, "ask": 100.5}
         mock_meta.get_symbol_specification.return_value = {"digits": 5, "volumeStep": 0.01}
         mock_meta.extract_observed_price.return_value = 100.5
-        mock_meta.get_account_information.return_value = {"balance": 10000.0, "equity": 10000.0}
+        mock_meta.get_account_information.return_value = {
+            "balance": 10000.0,
+            "equity": 10000.0,
+            "freeMargin": 10000.0,
+            "margin": 0.0,
+        }
 
         sizing_result = SimpleNamespace(
             blocked=False,
