@@ -28,11 +28,11 @@ def upgrade() -> None:
 
     # 1. Add columns to trades table
     columns_to_add = [
-        ("broker_account_id", sa.Integer(), sa.ForeignKey("broker_accounts.id")),
+        ("broker_account_id", sa.Integer(), "broker_accounts"),
         ("execution_mode", sa.String(length=20), None),
         ("provider", sa.String(length=50), None),
         ("broker_symbol", sa.String(length=30), None),
-        ("execution_intent_id", sa.Integer(), sa.ForeignKey("execution_intents.id")),
+        ("execution_intent_id", sa.Integer(), "execution_intents"),
         ("broker_position_id", sa.String(length=255), None),
         ("broker_deal_id", sa.String(length=255), None),
         ("requested_price", sa.Float(), None),
@@ -47,13 +47,12 @@ def upgrade() -> None:
         ("closed_time", sa.DateTime(), None),
     ]
 
-    for col_name, col_type, fk in columns_to_add:
+    for col_name, col_type, target_table in columns_to_add:
         if not _has_column(inspector, "trades", col_name):
             op.add_column("trades", sa.Column(col_name, col_type, nullable=True))
-            if fk is not None:
+            if target_table is not None:
                 # Add foreign key constraint
                 constraint_name = f"fk_trades_{col_name}"
-                target_table = fk.column.table.name
                 op.create_foreign_key(
                     constraint_name,
                     source_table="trades",
