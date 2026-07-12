@@ -38,6 +38,7 @@ def run_all_scanner_profiles(self):
     )
     from app.services.scanner.pipeline import run_scanner_pipeline
     from app.services.scanner.indicators import spread_in_points
+    from app.services.broker_symbol_sync import needs_symbol_sync, sync_broker_symbols_for_account
 
     if not settings.SCANNER_ENABLED:
         return
@@ -92,6 +93,11 @@ def _scan_profile(db, profile):
 
     symbols = profile.symbols or []
     timeframes = profile.timeframes or ["H1"]
+
+    if symbols and needs_symbol_sync(db, profile.broker_account_id, symbols):
+        sync_result = sync_broker_symbols_for_account(db, account, preferred_symbols=symbols)
+        if sync_result.synced:
+            db.commit()
 
     # Build symbol → broker_symbol map from BrokerSymbol table
     broker_symbol_map = {}

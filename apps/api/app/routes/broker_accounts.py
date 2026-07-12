@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app import models, schemas
 from app.database import get_db
 from app.services import metaapi
+from app.services.broker_symbol_sync import sync_broker_symbols_for_account
 from app.services.notify import create_notification
 
 router = APIRouter()
@@ -58,7 +59,12 @@ async def list_broker_accounts(
             remote = metaapi.get_account(account.metaapi_account_id)
         except metaapi.MetaApiError:
             continue
+        state = (remote.get("state") or "").lower()
+        connection = (remote.get("connectionStatus") or "").lower()
         has_updates = _apply_remote_state(account, remote) or has_updates
+        if state == "deployed" and connection == "connected":
+            sync_result = sync_broker_symbols_for_account(db, account)
+            has_updates = has_updates or sync_result.synced > 0
 
     if has_updates:
         db.commit()
@@ -228,6 +234,7 @@ async def refresh_account_state(
             account.currency = (info.get("currency") or account.currency)[:3]
         except metaapi.MetaApiError:
             pass  # state still refreshes even if balance fetch fails
+        sync_broker_symbols_for_account(db, account)
 
     db.commit()
     db.refresh(account)
@@ -247,6 +254,8 @@ async def list_account_symbols(
         symbols = metaapi.get_symbols(metaapi_id)
     except metaapi.MetaApiError as exc:
         raise _metaapi_error(exc)
+    sync_broker_symbols_for_account(db, account)
+    db.commit()
     return {"symbols": symbols}
 
 

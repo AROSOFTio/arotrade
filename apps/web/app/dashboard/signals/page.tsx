@@ -93,7 +93,7 @@ type ScannerProfile = {
 }
 
 export default function SignalsPage() {
-  const [activeTab, setActiveTab] = useState<'signals' | 'scanner'>('signals')
+  const [activeTab, setActiveTab] = useState<'signals' | 'scanner'>('scanner')
   const [signals, setSignals] = useState<Signal[]>([])
   const [form, setForm] = useState<SignalForm>(initialForm)
   const [selectedId, setSelectedId] = useState<number | null>(null)
@@ -156,19 +156,23 @@ export default function SignalsPage() {
     }
   }
 
+  const loadBrokerAccounts = async () => {
+    try {
+      const accounts = await apiRequest<LiveBrokerAccount[]>('/broker-accounts')
+      const active = accounts.filter((a) => a.is_active && a.metaapi_account_id)
+      setLiveAccounts(active)
+      if (active.length > 0) {
+        setNewProfileForm((f) => ({ ...f, broker_account_id: String(active[0].id) }))
+      }
+    } catch {
+      // Keep the signal desk usable even if account refresh is temporarily unavailable.
+    }
+  }
+
   useEffect(() => {
     void loadSignals()
     void loadScannerProfiles()
     apiRequest<LiveExecutionStatus>('/auth/me/execution-status').then(setLiveExecutionStatus).catch(() => undefined)
-    const loadBrokerAccounts = () => apiRequest<LiveBrokerAccount[]>('/broker-accounts')
-      .then((accounts) => {
-        const active = accounts.filter((a) => a.is_active && a.metaapi_account_id)
-        setLiveAccounts(active)
-        if (active.length > 0) {
-          setNewProfileForm((f) => ({ ...f, broker_account_id: String(active[0].id) }))
-        }
-      })
-      .catch(() => undefined)
     void loadBrokerAccounts()
 
     const interval = window.setInterval(() => {
@@ -635,6 +639,29 @@ export default function SignalsPage() {
               {scannerError || scannerMessage}
             </div>
           )}
+
+          <div className="mb-5 flex flex-col justify-between gap-3 rounded-md border border-blue-100 bg-blue-50 px-4 py-3 sm:flex-row sm:items-center">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-950">Connected account scanners</h2>
+              <p className="mt-1 text-xs leading-5 text-slate-600">Deployed MT5 accounts are discovered automatically. Alerts stay approval-required before any broker entry.</p>
+            </div>
+            <button
+              type="button"
+              className="btn-secondary min-h-9 shrink-0 border-blue-200 bg-white text-[#2563eb]"
+              onClick={async () => {
+                setScannerError('')
+                setScannerMessage('')
+                setProfilesLoading(true)
+                await loadBrokerAccounts()
+                await loadScannerProfiles(false)
+                setScannerMessage('Connected accounts refreshed. Automated scanners are synced.')
+                setProfilesLoading(false)
+              }}
+            >
+              <RefreshCw size={14} aria-hidden="true" />
+              Sync accounts
+            </button>
+          </div>
 
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
             {/* Active profiles list */}

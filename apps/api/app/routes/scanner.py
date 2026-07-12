@@ -26,6 +26,12 @@ from sqlalchemy.orm import Session
 from app import models
 from app.database import SessionLocal
 from app.auth import get_current_user
+from app.services import metaapi_gateway as metaapi
+from app.services.broker_symbol_sync import (
+    default_symbols_for_account,
+    needs_symbol_sync,
+    sync_broker_symbols_for_account,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +115,99 @@ def _serialize_profile(profile: models.ScannerProfile) -> dict:
     }
 
 
+def _apply_remote_state(account: models.BrokerAccount, remote: dict) -> tuple[str, str]:
+    state = (remote.get("state") or "").lower()
+    connection = (remote.get("connectionStatus") or "").lower()
+    if state:
+        account.connection_state = "deployed" if state == "deployed" else state
+    return state, connection
+
+
+def _execution_mode_for_account(account: models.BrokerAccount) -> str:
+    return "live" if account.account_type == models.TradingMode.LIVE else "broker_demo"
+
+
+def _auto_profile_name(account: models.BrokerAccount) -> str:
+    label = account.name or account.account_id or str(account.id)
+    return f"Auto Scanner - {label}"
+
+
+def _ensure_connected_account_profiles(db: Session, user_id: int) -> dict:
+    """Refresh connected accounts, sync broker symbols, and create safe default scanners."""
+    accounts = (
+        db.query(models.BrokerAccount)
+        .filter(
+            models.BrokerAccount.user_id == user_id,
+            models.BrokerAccount.is_active == True,  # noqa: E712
+            models.BrokerAccount.metaapi_account_id.isnot(None),
+        )
+        .all()
+    )
+
+    created_profile_ids: list[int] = []
+    synced_accounts = 0
+    connected_accounts = 0
+
+    for account in accounts:
+        try:
+            remote = metaapi.get_account(account.metaapi_account_id)
+        except metaapi.MetaApiError:
+            continue
+
+        state, connection = _apply_remote_state(account, remote)
+        if state != "deployed" or connection != "connected":
+            continue
+
+        connected_accounts += 1
+        if needs_symbol_sync(db, account.id):
+            result = sync_broker_symbols_for_account(db, account)
+            if result.synced:
+                synced_accounts += 1
+
+        existing = (
+            db.query(models.ScannerProfile)
+            .filter(models.ScannerProfile.user_id == user_id, models.ScannerProfile.broker_account_id == account.id)
+            .first()
+        )
+        if existing:
+            continue
+
+        symbols = default_symbols_for_account(db, account.id)
+        if not symbols:
+            continue
+
+        profile = models.ScannerProfile(
+            user_id=user_id,
+            broker_account_id=account.id,
+            name=_auto_profile_name(account),
+            execution_mode=_execution_mode_for_account(account),
+            symbols=symbols,
+            timeframes=["M15", "H1"],
+            active_strategy_ids=[],
+            minimum_confidence=70.0,
+            minimum_risk_reward=1.5,
+            max_spread_points=None,
+            maximum_signal_age_minutes=240,
+            risk_percent=0.5,
+            news_block_before_minutes=30,
+            news_block_after_minutes=30,
+            scan_enabled=True,
+            approval_required=True,
+        )
+        db.add(profile)
+        db.flush()
+        created_profile_ids.append(profile.id)
+
+    if created_profile_ids or synced_accounts or connected_accounts:
+        db.commit()
+
+    return {
+        "connected_accounts": connected_accounts,
+        "synced_accounts": synced_accounts,
+        "created_profile_ids": created_profile_ids,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -161,6 +260,7 @@ def list_profiles(
 ):
     """List all scanner profiles for the current user."""
     user_id = _current_user_id(current_user)
+    sync_summary = _ensure_connected_account_profiles(db, user_id)
     profiles = (
         db.query(models.ScannerProfile)
         .filter(models.ScannerProfile.user_id == user_id)
@@ -171,6 +271,7 @@ def list_profiles(
         "success": True,
         "profiles": [_serialize_profile(p) for p in profiles],
         "total": len(profiles),
+        "sync": sync_summary,
     }
 
 
@@ -306,6 +407,15 @@ def trigger_scan(
     if not profile:
         raise HTTPException(status_code=404, detail="Scanner profile not found")
 
+    if profile.broker_account_id and needs_symbol_sync(db, profile.broker_account_id, profile.symbols):
+        account = db.query(models.BrokerAccount).filter(
+            models.BrokerAccount.id == profile.broker_account_id,
+            models.BrokerAccount.user_id == user_id,
+        ).first()
+        if account:
+            sync_broker_symbols_for_account(db, account, preferred_symbols=profile.symbols)
+            db.commit()
+
     try:
         from app.workers.scanner_tasks import run_single_profile
         task = run_single_profile.delay(profile_id)
@@ -343,6 +453,7 @@ def scanner_status(
     """Global scanner status for this user."""
     from app.config import settings
     user_id = _current_user_id(current_user)
+    sync_summary = _ensure_connected_account_profiles(db, user_id)
 
     profiles = (
         db.query(models.ScannerProfile)
@@ -376,4 +487,5 @@ def scanner_status(
         "total_symbols_watched": total_symbols,
         "total_timeframes_watched": total_timeframes,
         "signals_last_24h": recent_signals,
+        "sync": sync_summary,
     }
