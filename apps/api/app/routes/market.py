@@ -67,7 +67,7 @@ async def analyze_news_impact(payload: dict, current_user: dict = Depends(_auth)
     if not events:
         result = {
             "symbol": symbol,
-            "summary": "No high or medium impact economic events are scheduled in the next few days for this market."
+            "summary": "No high or medium impact economic events are scheduled in the next 7 days for this market."
                        + (" Synthetic indices are not driven by macro news." if not news.relevant_currencies(symbol) else ""),
             "events": [],
         }

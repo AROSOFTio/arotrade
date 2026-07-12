@@ -128,16 +128,20 @@ export default function MarketsPage() {
     }
   }
 
-  const loadSotd = async () => {
+  const loadSotd = useCallback(async (refresh = false) => {
     setSotdLoading(true)
     try {
-      setSotd(await apiRequest<Sotd>('/ai/signal-of-the-day'))
+      setSotd(await apiRequest<Sotd>(`/ai/signal-of-the-day${refresh ? '?refresh=true' : ''}`))
     } catch (requestError) {
       setError(errorMessage(requestError))
     } finally {
       setSotdLoading(false)
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    void loadSotd()
+  }, [loadSotd])
 
   return (
     <>
@@ -174,7 +178,7 @@ export default function MarketsPage() {
           <div className="card">
             <div className="flex items-center justify-between gap-3">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900"><Sparkles size={15} className="text-[#2563eb]" aria-hidden="true" /> Signal of the day</h2>
-              <button type="button" disabled={sotdLoading} onClick={() => void loadSotd()} className="btn-secondary min-h-8 px-3 py-1 text-xs">{sotdLoading ? 'Working…' : sotd ? 'Refresh' : 'Reveal'}</button>
+              <button type="button" disabled={sotdLoading} onClick={() => void loadSotd(Boolean(sotd))} className="btn-secondary min-h-8 px-3 py-1 text-xs">{sotdLoading ? 'Working…' : sotd ? 'Refresh' : 'Reveal'}</button>
             </div>
             {sotd ? (
               <div className="mt-4">
@@ -183,14 +187,15 @@ export default function MarketsPage() {
                   <span className={`rounded-full px-2.5 py-1 text-xs font-bold uppercase ${sotd.signal === 'buy' ? 'bg-[#f0fdf4] text-[#15803d]' : sotd.signal === 'sell' ? 'bg-[#fef2f2] text-[#b91c1c]' : 'bg-slate-100 text-slate-600'}`}>{sotd.signal} · {sotd.confidence}%</span>
                 </div>
                 <dl className="mt-3 grid grid-cols-3 gap-2 text-center">
-                  <div className="rounded-md bg-slate-50 px-2 py-2"><dt className="text-[10px] font-semibold uppercase text-slate-500">Entry</dt><dd className="mt-0.5 text-xs font-bold tabular-nums text-slate-900">{sotd.entry_min}–{sotd.entry_max}</dd></div>
-                  <div className="rounded-md bg-slate-50 px-2 py-2"><dt className="text-[10px] font-semibold uppercase text-slate-500">Stop</dt><dd className="mt-0.5 text-xs font-bold tabular-nums text-[#b91c1c]">{sotd.stop_loss}</dd></div>
-                  <div className="rounded-md bg-slate-50 px-2 py-2"><dt className="text-[10px] font-semibold uppercase text-slate-500">Target</dt><dd className="mt-0.5 text-xs font-bold tabular-nums text-[#15803d]">{sotd.take_profit_1 ?? '—'}</dd></div>
+                  <div className="rounded-md bg-slate-50 px-2 py-2"><dt className="text-[10px] font-semibold uppercase text-slate-500">Entry</dt><dd className="mt-0.5 text-xs font-bold tabular-nums text-slate-900">{formatNumber(sotd.entry_min, 5)}–{formatNumber(sotd.entry_max, 5)}</dd></div>
+                  <div className="rounded-md bg-slate-50 px-2 py-2"><dt className="text-[10px] font-semibold uppercase text-slate-500">Stop</dt><dd className="mt-0.5 text-xs font-bold tabular-nums text-[#b91c1c]">{formatNumber(sotd.stop_loss, 5)}</dd></div>
+                  <div className="rounded-md bg-slate-50 px-2 py-2"><dt className="text-[10px] font-semibold uppercase text-slate-500">Target</dt><dd className="mt-0.5 text-xs font-bold tabular-nums text-[#15803d]">{sotd.take_profit_1 ? formatNumber(sotd.take_profit_1, 5) : '—'}</dd></div>
                 </dl>
                 {sotd.reasoning?.[1] && <p className="mt-3 text-xs leading-5 text-slate-600">{sotd.reasoning.slice(1, 3).join(' ')}</p>}
+                <p className="mt-3 text-[11px] text-slate-400">Generated from live H4 candle data. Refresh runs a new scan.</p>
               </div>
             ) : (
-              <p className="mt-3 text-xs leading-5 text-slate-500">One AI-picked setup per day, chosen from live H4 data across major markets. Press Reveal to load today&apos;s pick.</p>
+              <p className="mt-3 text-xs leading-5 text-slate-500">Loading one AI-picked setup from live H4 data across major markets.</p>
             )}
           </div>
 
@@ -206,7 +211,7 @@ export default function MarketsPage() {
             )}
             <div className="mt-3 max-h-64 space-y-2 overflow-y-auto">
               {news.length === 0 ? (
-                <p className="text-xs text-slate-500">No high/medium-impact events in the next few days for this market.</p>
+                <p className="text-xs text-slate-500">No high/medium-impact events in the next 7 days for this market.</p>
               ) : (
                 news.map((event, index) => (
                   <div key={`${event.title}-${index}`} className="flex items-start gap-2 rounded-md border border-slate-100 px-3 py-2">

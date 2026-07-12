@@ -12,7 +12,10 @@ from typing import Optional
 
 import httpx
 
-CALENDAR_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+CALENDAR_URLS = (
+    "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+    "https://nfs.faireconomy.media/ff_calendar_nextweek.json",
+)
 
 _calendar_cache: dict = {"expires": 0.0, "events": []}
 _impact_cache: dict[str, tuple[float, dict]] = {}
@@ -44,32 +47,48 @@ def relevant_currencies(symbol: str) -> set[str]:
     return set()
 
 
+def _clean_event(event: dict) -> dict:
+    return {
+        "title": event.get("title", ""),
+        "currency": event.get("country", ""),
+        "date": event.get("date", ""),
+        "impact": event.get("impact", ""),
+        "forecast": event.get("forecast") or None,
+        "previous": event.get("previous") or None,
+    }
+
+
 def fetch_calendar() -> list[dict]:
     now = time.monotonic()
     with _lock:
         if _calendar_cache["expires"] > now and _calendar_cache["events"]:
             return _calendar_cache["events"]
 
-    try:
-        response = httpx.get(CALENDAR_URL, timeout=20.0, follow_redirects=True)
-        response.raise_for_status()
-        events = response.json()
-    except Exception as exc:
-        raise NewsError(f"Could not fetch the economic calendar: {exc}") from exc
-
+    errors = []
     cleaned = []
-    for event in events:
+    seen = set()
+    for url in CALENDAR_URLS:
         try:
-            cleaned.append({
-                "title": event.get("title", ""),
-                "currency": event.get("country", ""),
-                "date": event.get("date", ""),
-                "impact": event.get("impact", ""),
-                "forecast": event.get("forecast") or None,
-                "previous": event.get("previous") or None,
-            })
-        except Exception:
+            response = httpx.get(url, timeout=20.0, follow_redirects=True)
+            response.raise_for_status()
+            events = response.json()
+        except Exception as exc:
+            errors.append(f"{url}: {exc}")
             continue
+
+        for event in events:
+            try:
+                item = _clean_event(event)
+                key = (item["title"], item["currency"], item["date"])
+                if key in seen:
+                    continue
+                seen.add(key)
+                cleaned.append(item)
+            except Exception:
+                continue
+
+    if not cleaned:
+        raise NewsError(f"Could not fetch the economic calendar: {'; '.join(errors) or 'no events returned'}")
 
     with _lock:
         _calendar_cache["events"] = cleaned
@@ -77,7 +96,7 @@ def fetch_calendar() -> list[dict]:
     return cleaned
 
 
-def upcoming_events(symbol: Optional[str] = None, hours_ahead: int = 96, include_past_hours: int = 8) -> list[dict]:
+def upcoming_events(symbol: Optional[str] = None, hours_ahead: int = 168, include_past_hours: int = 4) -> list[dict]:
     """High/medium-impact events in the window, optionally filtered for a symbol."""
     events = fetch_calendar()
     now = datetime.now(timezone.utc)

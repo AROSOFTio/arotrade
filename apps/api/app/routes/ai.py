@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
 from sqlalchemy.orm import Session
 from app import models, schemas
 from app.database import get_db
@@ -129,8 +129,22 @@ async def analyze_image_upload(
     return _persist_analysis(db, current_user["user_id"], symbol, timeframe, prompt or None, result)
 
 
+def _extract_sotd_symbol(result: dict) -> str:
+    for reason in result.get("reasoning", []):
+        text = str(reason)
+        if text.lower().startswith("selected market:"):
+            candidate = text.split(":", 1)[1].strip().upper()
+            if candidate in SOTD_CANDIDATES:
+                return candidate
+        for candidate in SOTD_CANDIDATES:
+            if candidate in text.upper():
+                return candidate
+    return "EURUSD"
+
+
 @router.get("/signal-of-the-day", response_model=schemas.AIAnalysisResponse)
 async def signal_of_the_day(
+    refresh: bool = Query(False, description="Generate a fresh AI pick instead of returning today's cached setup"),
     current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -142,7 +156,7 @@ async def signal_of_the_day(
         models.AIAnalysis.prompt == SIGNAL_OF_THE_DAY_MARKER,
         models.AIAnalysis.created_at >= today_start,
     ).order_by(models.AIAnalysis.created_at.desc()).first()
-    if existing:
+    if existing and not refresh:
         return existing
 
     # Build a multi-market context and let the model pick one setup
@@ -160,15 +174,12 @@ async def signal_of_the_day(
         "You are given live H4 candles for several markets. Pick the SINGLE best "
         "risk-defined setup right now among them and produce your analysis for that "
         "market only. Set the symbol you chose as the first reasoning entry, "
-        "formatted exactly like: 'Selected market: <SYMBOL>'."
+        "formatted exactly like: 'Selected market: <SYMBOL>'. If no market has a "
+        "clean risk-defined setup, return signal hold with low confidence and still "
+        "choose the clearest market from the supplied list."
     )
     result = _run_or_raise(symbol="MULTI", timeframe="H4", prompt=selection_prompt, price_context="\n\n".join(sections))
-
-    chosen = "EURUSD"
-    for reason in result.get("reasoning", []):
-        if reason.lower().startswith("selected market:"):
-            chosen = reason.split(":", 1)[1].strip().upper() or chosen
-            break
+    chosen = _extract_sotd_symbol(result)
 
     analysis = models.AIAnalysis(
         user_id=current_user["user_id"],
