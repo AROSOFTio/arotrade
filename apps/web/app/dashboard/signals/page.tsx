@@ -52,6 +52,8 @@ const initialForm: SignalForm = {
   notes: '',
 }
 
+const SIGNAL_REFRESH_MS = 60_000
+
 type LiveExecutionStatus = {
   live_trading: {
     user_preference: boolean
@@ -129,8 +131,8 @@ export default function SignalsPage() {
 
   const selectedSignal = signals.find((signal) => signal.id === selectedId) || null
 
-  const loadSignals = async () => {
-    setLoading(true)
+  const loadSignals = async (showLoading = true) => {
+    if (showLoading) setLoading(true)
     try {
       const response = await apiRequest<Signal[]>('/signals')
       setSignals(response)
@@ -138,19 +140,19 @@ export default function SignalsPage() {
     } catch (requestError) {
       setError(errorMessage(requestError))
     } finally {
-      setLoading(false)
+      if (showLoading) setLoading(false)
     }
   }
 
-  const loadScannerProfiles = async () => {
-    setProfilesLoading(true)
+  const loadScannerProfiles = async (showLoading = true) => {
+    if (showLoading) setProfilesLoading(true)
     try {
       const response = await apiRequest<{ profiles: ScannerProfile[] }>('/scanner/profiles')
       setProfiles(response.profiles)
     } catch (requestError) {
       setScannerError(errorMessage(requestError))
     } finally {
-      setProfilesLoading(false)
+      if (showLoading) setProfilesLoading(false)
     }
   }
 
@@ -158,7 +160,7 @@ export default function SignalsPage() {
     void loadSignals()
     void loadScannerProfiles()
     apiRequest<LiveExecutionStatus>('/auth/me/execution-status').then(setLiveExecutionStatus).catch(() => undefined)
-    apiRequest<LiveBrokerAccount[]>('/broker-accounts')
+    const loadBrokerAccounts = () => apiRequest<LiveBrokerAccount[]>('/broker-accounts')
       .then((accounts) => {
         const active = accounts.filter((a) => a.is_active && a.metaapi_account_id)
         setLiveAccounts(active)
@@ -167,6 +169,16 @@ export default function SignalsPage() {
         }
       })
       .catch(() => undefined)
+    void loadBrokerAccounts()
+
+    const interval = window.setInterval(() => {
+      void loadSignals(false)
+      void loadScannerProfiles(false)
+      apiRequest<LiveExecutionStatus>('/auth/me/execution-status').then(setLiveExecutionStatus).catch(() => undefined)
+      void loadBrokerAccounts()
+    }, SIGNAL_REFRESH_MS)
+
+    return () => window.clearInterval(interval)
   }, [])
 
   const updateForm = (field: keyof SignalForm, value: string) => {
@@ -631,7 +643,7 @@ export default function SignalsPage() {
                 <Sliders size={16} className="text-[#2563eb]" />
                 Active scan configurations
               </h2>
-              <p className="mt-1 text-xs text-slate-500">Profiles run periodically on closed candles to automatically scan and suggest setups.</p>
+              <p className="mt-1 text-xs text-slate-500">Profiles run periodically on closed candles, create signal alerts, and this desk auto-refreshes every minute.</p>
               
               {profilesLoading && profiles.length === 0 ? (
                 <div className="flex items-center gap-2 p-8 text-sm text-slate-500"><Loader2 size={16} className="animate-spin" />Loading scanner configurations…</div>

@@ -25,6 +25,9 @@ type Sotd = {
 }
 
 const timeframes = ['M5', 'M15', 'M30', 'H1', 'H4', 'D1']
+const NEWS_REFRESH_MS = 2 * 60_000
+const AI_REFRESH_MS = 5 * 60_000
+const updateTime = (date: Date | null) => date ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'pending'
 
 export default function MarketsPage() {
   const [symbols, setSymbols] = useState<string[]>([])
@@ -36,6 +39,9 @@ export default function MarketsPage() {
   const [impactLoading, setImpactLoading] = useState(false)
   const [sotd, setSotd] = useState<Sotd | null>(null)
   const [sotdLoading, setSotdLoading] = useState(false)
+  const [newsUpdatedAt, setNewsUpdatedAt] = useState<Date | null>(null)
+  const [impactUpdatedAt, setImpactUpdatedAt] = useState<Date | null>(null)
+  const [sotdUpdatedAt, setSotdUpdatedAt] = useState<Date | null>(null)
   const [error, setError] = useState('')
   const chartContainerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
@@ -107,31 +113,43 @@ export default function MarketsPage() {
     apiRequest<Price>(`/market/price?symbol=${symbol}`).then(setPrice).catch(() => undefined)
   }, [symbol])
 
+  const loadNews = useCallback(() => {
+    apiRequest<{ events: NewsEvent[] }>(`/market/news?symbol=${symbol}`)
+      .then((r) => {
+        setNews(r.events)
+        setNewsUpdatedAt(new Date())
+      })
+      .catch(() => setNews([]))
+  }, [symbol])
+
   useEffect(() => {
     void loadCandles()
     loadPrice()
     setImpact(null)
-    apiRequest<{ events: NewsEvent[] }>(`/market/news?symbol=${symbol}`).then((r) => setNews(r.events)).catch(() => setNews([]))
+    loadNews()
     const priceInterval = window.setInterval(loadPrice, 10000)
     const candleInterval = window.setInterval(() => void loadCandles(), 30000)
-    return () => { window.clearInterval(priceInterval); window.clearInterval(candleInterval) }
-  }, [loadCandles, loadPrice, symbol])
+    const newsInterval = window.setInterval(loadNews, NEWS_REFRESH_MS)
+    return () => { window.clearInterval(priceInterval); window.clearInterval(candleInterval); window.clearInterval(newsInterval) }
+  }, [loadCandles, loadPrice, loadNews])
 
-  const analyzeNews = async () => {
+  const analyzeNews = useCallback(async () => {
     setImpactLoading(true)
     try {
       setImpact(await apiRequest<NewsImpact>('/market/news/analyze', { method: 'POST', body: JSON.stringify({ symbol }) }))
+      setImpactUpdatedAt(new Date())
     } catch (requestError) {
       setError(errorMessage(requestError))
     } finally {
       setImpactLoading(false)
     }
-  }
+  }, [symbol])
 
   const loadSotd = useCallback(async (refresh = false) => {
     setSotdLoading(true)
     try {
       setSotd(await apiRequest<Sotd>(`/ai/signal-of-the-day${refresh ? '?refresh=true' : ''}`))
+      setSotdUpdatedAt(new Date())
     } catch (requestError) {
       setError(errorMessage(requestError))
     } finally {
@@ -141,7 +159,16 @@ export default function MarketsPage() {
 
   useEffect(() => {
     void loadSotd()
+    const interval = window.setInterval(() => void loadSotd(true), AI_REFRESH_MS)
+    return () => window.clearInterval(interval)
   }, [loadSotd])
+
+  useEffect(() => {
+    setImpact(null)
+    void analyzeNews()
+    const interval = window.setInterval(() => void analyzeNews(), AI_REFRESH_MS)
+    return () => window.clearInterval(interval)
+  }, [analyzeNews])
 
   return (
     <>
@@ -192,7 +219,7 @@ export default function MarketsPage() {
                   <div className="rounded-md bg-slate-50 px-2 py-2"><dt className="text-[10px] font-semibold uppercase text-slate-500">Target</dt><dd className="mt-0.5 text-xs font-bold tabular-nums text-[#15803d]">{sotd.take_profit_1 ? formatNumber(sotd.take_profit_1, 5) : '—'}</dd></div>
                 </dl>
                 {sotd.reasoning?.[1] && <p className="mt-3 text-xs leading-5 text-slate-600">{sotd.reasoning.slice(1, 3).join(' ')}</p>}
-                <p className="mt-3 text-[11px] text-slate-400">Generated from live H4 candle data. Refresh runs a new scan.</p>
+                <p className="mt-3 text-[11px] text-slate-400">Auto-refreshes every 5 min from live H4 data. Last update: {updateTime(sotdUpdatedAt)}.</p>
               </div>
             ) : (
               <p className="mt-3 text-xs leading-5 text-slate-500">Loading one AI-picked setup from live H4 data across major markets.</p>
@@ -204,6 +231,7 @@ export default function MarketsPage() {
               <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900"><CalendarClock size={15} className="text-[#2563eb]" aria-hidden="true" /> News IQ · {symbol}</h2>
               <button type="button" disabled={impactLoading} onClick={() => void analyzeNews()} className="btn-secondary min-h-8 px-3 py-1 text-xs">{impactLoading ? 'Analyzing…' : 'AI impact'}</button>
             </div>
+            <p className="mt-2 text-[11px] text-slate-400">Events auto-refresh every 2 min. AI impact auto-refreshes every 5 min. Last news: {updateTime(newsUpdatedAt)}. Last AI: {updateTime(impactUpdatedAt)}.</p>
             {impact && (
               <div className="mt-3 rounded-md border border-blue-100 bg-blue-50/60 px-3 py-3">
                 <p className="text-xs leading-5 text-slate-700">{impact.summary}</p>
