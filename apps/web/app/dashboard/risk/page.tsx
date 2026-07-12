@@ -76,7 +76,7 @@ export default function RiskPage() {
   }
 
   const liveConfirmed = Boolean(settings?.enable_live_trading && settings.accepted_live_disclaimer)
-  const workspaceMode = liveConfirmed && settings?.trading_mode?.toLowerCase() === 'live' ? 'Live' : 'Demo'
+  const workspaceMode = liveConfirmed ? 'Live' : 'Demo'
   const deployedAccounts = brokerAccounts.filter((account) =>
     account.is_active && account.metaapi_account_id && account.connection_state === 'deployed'
   )

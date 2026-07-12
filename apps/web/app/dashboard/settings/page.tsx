@@ -28,9 +28,27 @@ type BrokerAccount = {
   is_active: boolean
 }
 
+type ExecutionStatus = {
+  paper_trading: { platform_allowed: boolean; available: boolean; reason?: string | null }
+  broker_demo_trading: { platform_allowed: boolean; connected_accounts: number; available: boolean; reason?: string | null }
+  live_trading: {
+    user_preference: boolean
+    risk_disclosure: boolean
+    platform_permission: boolean
+    new_entries_allowed: boolean
+    live_account_verified: boolean
+    broker_connection: boolean
+    mfa_status: string
+    risk_control_status: string
+    final_eligibility: boolean
+    reasons: string[]
+  }
+}
+
 export default function SettingsPage() {
   const [user, setUser] = useState<User | null>(null)
   const [brokerAccounts, setBrokerAccounts] = useState<BrokerAccount[]>([])
+  const [executionStatus, setExecutionStatus] = useState<ExecutionStatus | null>(null)
   const [error, setError] = useState('')
   const [showConsent, setShowConsent] = useState(false)
   const [consentChecked, setConsentChecked] = useState(false)
@@ -40,10 +58,12 @@ export default function SettingsPage() {
     Promise.all([
       apiRequest<User>('/auth/me'),
       apiRequest<BrokerAccount[]>('/broker-accounts'),
+      apiRequest<ExecutionStatus>('/auth/me/execution-status'),
     ])
-      .then(([nextUser, nextBrokerAccounts]) => {
+      .then(([nextUser, nextBrokerAccounts, nextExecutionStatus]) => {
         setUser(nextUser)
         setBrokerAccounts(nextBrokerAccounts)
+        setExecutionStatus(nextExecutionStatus)
       })
       .catch((requestError) => setError(errorMessage(requestError)))
   }, [])
@@ -57,6 +77,7 @@ export default function SettingsPage() {
         body: JSON.stringify({ enable, accept_risk_disclaimer: acceptDisclaimer }),
       })
       setUser(updated)
+      setExecutionStatus(await apiRequest<ExecutionStatus>('/auth/me/execution-status'))
       setShowConsent(false)
       setConsentChecked(false)
     } catch (requestError) {
@@ -67,7 +88,8 @@ export default function SettingsPage() {
   }
 
   const liveConfirmed = Boolean(user?.enable_live_trading && user.accepted_live_disclaimer)
-  const workspaceMode = liveConfirmed && user?.trading_mode?.toLowerCase() === 'live' ? 'Live' : 'Demo'
+  const liveAvailable = Boolean(executionStatus?.live_trading.final_eligibility)
+  const workspaceMode = liveConfirmed ? 'Live' : 'Demo'
   const deployedAccounts = brokerAccounts.filter((account) =>
     account.is_active && account.metaapi_account_id && account.connection_state === 'deployed'
   )
@@ -101,7 +123,7 @@ export default function SettingsPage() {
           <dl className="mt-4 divide-y divide-slate-100 text-sm">
             <div className="flex justify-between gap-4 py-3"><dt className="text-slate-500">Workspace mode</dt><dd className={`font-semibold ${workspaceMode === 'Live' ? 'text-[#15803d]' : 'text-[#1d4ed8]'}`}>{workspaceMode}</dd></div>
             <div className="flex items-center justify-between gap-4 py-3">
-              <dt className="text-slate-500">Live trading</dt>
+              <dt className="text-slate-500">Your live preference</dt>
               <dd className="flex items-center gap-3">
                 <span className={`font-semibold ${liveConfirmed ? 'text-[#15803d]' : user?.enable_live_trading ? 'text-amber-700' : 'text-slate-900'}`}>{liveConfirmed ? 'Enabled' : user?.enable_live_trading ? 'Needs confirmation' : 'Off'}</span>
                 {user && (
@@ -113,8 +135,10 @@ export default function SettingsPage() {
                 )}
               </dd>
             </div>
+            <div className="flex justify-between gap-4 py-3"><dt className="text-slate-500">Platform permission</dt><dd className={`font-semibold ${executionStatus?.live_trading.platform_permission ? 'text-[#15803d]' : 'text-amber-700'}`}>{executionStatus?.live_trading.platform_permission ? 'Allowed' : 'Paused'}</dd></div>
+            <div className="flex justify-between gap-4 py-3"><dt className="text-slate-500">New live entries</dt><dd className={`font-semibold ${executionStatus?.live_trading.new_entries_allowed ? 'text-[#15803d]' : 'text-amber-700'}`}>{executionStatus?.live_trading.new_entries_allowed ? 'Allowed' : 'Paused'}</dd></div>
             <div className="flex justify-between gap-4 py-3">
-              <dt className="text-slate-500">Broker adapter</dt>
+              <dt className="text-slate-500">Broker connection</dt>
               <dd className="text-right">
                 <span className={`font-semibold ${brokerAdapter ? 'text-[#15803d]' : 'text-slate-900'}`}>{brokerAdapterLabel}</span>
                 {brokerAdapter && (
@@ -122,10 +146,20 @@ export default function SettingsPage() {
                 )}
               </dd>
             </div>
+            <div className="flex justify-between gap-4 py-3"><dt className="text-slate-500">MFA status</dt><dd className="font-semibold capitalize text-slate-900">{executionStatus?.live_trading.mfa_status?.replace(/_/g, ' ') || '—'}</dd></div>
+            <div className="flex justify-between gap-4 py-3"><dt className="text-slate-500">Risk controls</dt><dd className={`font-semibold ${executionStatus?.live_trading.risk_control_status === 'configured' ? 'text-[#15803d]' : 'text-amber-700'}`}>{executionStatus?.live_trading.risk_control_status || '—'}</dd></div>
+            <div className="flex justify-between gap-4 py-3"><dt className="text-slate-500">Execution status</dt><dd className={`font-semibold ${liveAvailable ? 'text-[#15803d]' : 'text-amber-700'}`}>{liveAvailable ? 'Available' : 'Not available'}</dd></div>
           </dl>
-          <p className="mt-3 text-xs leading-5 text-slate-500">
-            Live trading is your choice. Enabling it records your consent; live orders start flowing once a broker adapter (MT5 / Deriv) is connected to your account.
-          </p>
+          {executionStatus?.live_trading.reasons?.length ? (
+            <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-xs leading-5 text-amber-800">
+              <p className="font-semibold">Live trading remains controlled by you, but new live orders are blocked right now:</p>
+              <ul className="mt-2 list-disc space-y-1 pl-4">
+                {executionStatus.live_trading.reasons.map((reason) => <li key={reason}>{reason}</li>)}
+              </ul>
+            </div>
+          ) : (
+            <p className="mt-3 text-xs leading-5 text-slate-500">Live execution is available when your preference, platform permission, broker connection and risk controls all pass.</p>
+          )}
           <Link href="/dashboard/risk" className="btn-secondary mt-5">Open risk controls <ExternalLink size={16} aria-hidden="true" /></Link>
         </div>
       </section>

@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from app import models, schemas
 from app.database import get_db
+from app.services import trading_control
 
 router = APIRouter()
 
@@ -21,6 +22,13 @@ async def check_admin(
         )
 
     return user
+
+
+def _request_ip(request: Request) -> str | None:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",", 1)[0].strip()
+    return request.client.host if request.client else None
 
 
 @router.get("/dashboard", dependencies=[Depends(check_admin)])
@@ -68,6 +76,52 @@ async def admin_dashboard(
         risk_violations=risk_violations,
         api_errors=0  # TODO: Track API errors
     )
+
+
+@router.get("/live-control", dependencies=[Depends(check_admin)])
+async def get_live_control(
+    current_user: models.User = Depends(check_admin),
+    db: Session = Depends(get_db),
+):
+    control = trading_control.get_platform_control(db)
+    summary = trading_control.platform_health_summary(db)
+    recent_audits = db.query(models.AuditLog).filter(
+        models.AuditLog.action == "platform_live_control_update"
+    ).order_by(models.AuditLog.created_at.desc()).limit(20).all()
+    return {
+        "control": control,
+        "account_summary": {key: value for key, value in summary.items() if key != "health"},
+        "health": summary["health"],
+        "recent_audit": recent_audits,
+    }
+
+
+@router.patch("/live-control", dependencies=[Depends(check_admin)])
+async def update_live_control(
+    payload: schemas.PlatformTradingControlUpdate,
+    request: Request,
+    current_user: models.User = Depends(check_admin),
+    db: Session = Depends(get_db),
+):
+    updates = payload.model_dump(
+        exclude_none=True,
+        exclude={"reason", "confirmation"},
+    )
+    control = trading_control.update_platform_control(
+        db,
+        admin_user=current_user,
+        updates=updates,
+        reason=payload.reason.strip(),
+        ip_address=_request_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        request_id=request.headers.get("x-request-id"),
+    )
+    summary = trading_control.platform_health_summary(db)
+    return {
+        "control": control,
+        "account_summary": {key: value for key, value in summary.items() if key != "health"},
+        "health": summary["health"],
+    }
 
 
 @router.get("/audit-logs", dependencies=[Depends(check_admin)])
@@ -119,7 +173,7 @@ async def disable_user(
 
     # Log audit
     audit = models.AuditLog(
-        user_id=current_user["user_id"],
+        user_id=current_user.id,
         action="disable_user",
         resource="user",
         resource_id=user_id,
@@ -154,7 +208,7 @@ async def enable_user_live_trading(
 
     # Log audit
     audit = models.AuditLog(
-        user_id=current_user["user_id"],
+        user_id=current_user.id,
         action="enable_live_trading",
         resource="user",
         resource_id=user_id,

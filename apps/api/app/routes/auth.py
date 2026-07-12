@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from datetime import timedelta
 from app import models, schemas
 from app.database import get_db
+from app.services import trading_control
 from app.auth import (
     hash_password, verify_password, create_access_token,
     create_refresh_token, verify_token, validate_password
@@ -142,16 +143,26 @@ async def get_current_user_info(
             detail="User not found"
         )
 
-    if user.enable_live_trading and user.accepted_live_disclaimer and user.trading_mode != models.TradingMode.LIVE:
-        user.trading_mode = models.TradingMode.LIVE
-        db.commit()
-        db.refresh(user)
-    elif not user.enable_live_trading and user.trading_mode != models.TradingMode.DEMO:
-        user.trading_mode = models.TradingMode.DEMO
-        db.commit()
-        db.refresh(user)
-
     return user
+
+
+@router.get("/me/execution-status")
+async def get_current_user_execution_status(
+    current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Return effective execution availability without mutating saved preferences."""
+    user = db.query(models.User).filter(
+        models.User.id == current_user["user_id"]
+    ).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    return trading_control.execution_status_for_user(db, user)
 
 
 @router.patch("/me/settings", response_model=schemas.UserResponse)

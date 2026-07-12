@@ -52,7 +52,14 @@ const initialForm: SignalForm = {
   notes: '',
 }
 
-type LiveUser = { enable_live_trading: boolean; accepted_live_disclaimer: boolean }
+type LiveExecutionStatus = {
+  live_trading: {
+    user_preference: boolean
+    risk_disclosure: boolean
+    final_eligibility: boolean
+    reasons: string[]
+  }
+}
 
 type LiveBrokerAccount = {
   id: number
@@ -71,7 +78,7 @@ export default function SignalsPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [observedPrice, setObservedPrice] = useState('')
   const [volume, setVolume] = useState('1')
-  const [liveUser, setLiveUser] = useState<LiveUser | null>(null)
+  const [liveExecutionStatus, setLiveExecutionStatus] = useState<LiveExecutionStatus | null>(null)
   const [liveAccounts, setLiveAccounts] = useState<LiveBrokerAccount[]>([])
   const [liveAccountId, setLiveAccountId] = useState('')
   const [liveVolume, setLiveVolume] = useState('0.01')
@@ -100,7 +107,7 @@ export default function SignalsPage() {
 
   useEffect(() => {
     void loadSignals()
-    apiRequest<LiveUser>('/auth/me').then(setLiveUser).catch(() => undefined)
+    apiRequest<LiveExecutionStatus>('/auth/me/execution-status').then(setLiveExecutionStatus).catch(() => undefined)
     apiRequest<LiveBrokerAccount[]>('/broker-accounts')
       .then((accounts) => setLiveAccounts(accounts.filter((a) => a.is_active && a.metaapi_account_id)))
       .catch(() => undefined)
@@ -245,10 +252,17 @@ export default function SignalsPage() {
 
         <div className="mt-6 border-t border-slate-200 pt-5">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900"><Zap size={15} className="text-amber-600" aria-hidden="true" /> Live execution</h2>
-          {!liveUser?.enable_live_trading ? (
+          {!liveExecutionStatus?.live_trading.user_preference ? (
             <p className="mt-2 rounded-md bg-slate-50 px-3 py-3 text-xs leading-5 text-slate-600">Live trading is off for your account. Enable it in Settings to send approved signals to your broker.</p>
-          ) : !liveUser.accepted_live_disclaimer ? (
+          ) : !liveExecutionStatus.live_trading.risk_disclosure ? (
             <p className="mt-2 rounded-md bg-slate-50 px-3 py-3 text-xs leading-5 text-slate-600">Live trading still needs your risk confirmation in Settings before orders can go to your broker.</p>
+          ) : !liveExecutionStatus.live_trading.final_eligibility ? (
+            <div className="mt-2 rounded-md bg-slate-50 px-3 py-3 text-xs leading-5 text-slate-600">
+              <p>Live trading remains enabled by you, but new live orders are not available right now.</p>
+              <ul className="mt-2 list-disc space-y-1 pl-4">
+                {liveExecutionStatus.live_trading.reasons.map((reason) => <li key={reason}>{reason}</li>)}
+              </ul>
+            </div>
           ) : liveAccounts.length === 0 ? (
             <p className="mt-2 rounded-md bg-slate-50 px-3 py-3 text-xs leading-5 text-slate-600">No connected broker account. Connect your MT5/Exness account on the Broker accounts page, then deploy it.</p>
           ) : (

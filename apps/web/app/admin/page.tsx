@@ -9,6 +9,12 @@ export default function AdminPage() {
   const [stats, setStats] = useState<any>(null)
   const [users, setUsers] = useState<any[]>([])
   const [logs, setLogs] = useState<any[]>([])
+  const [liveControl, setLiveControl] = useState<any>(null)
+  const [controlForm, setControlForm] = useState<any>(null)
+  const [controlReason, setControlReason] = useState('')
+  const [controlConfirmation, setControlConfirmation] = useState('')
+  const [controlMessage, setControlMessage] = useState('')
+  const [controlSaving, setControlSaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<'dashboard' | 'users' | 'logs' | 'settings'>('dashboard')
 
@@ -24,7 +30,7 @@ export default function AdminPage() {
 
   const fetchAdminData = async (token: string) => {
     try {
-      const [statsRes, usersRes, logsRes] = await Promise.all([
+      const [statsRes, usersRes, logsRes, liveControlRes] = await Promise.all([
         axios.get(`${process.env.NEXT_PUBLIC_API_URL}/admin/dashboard`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
@@ -34,15 +40,53 @@ export default function AdminPage() {
         axios.get(`${process.env.NEXT_PUBLIC_API_URL}/admin/audit-logs`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
+        axios.get(`${process.env.NEXT_PUBLIC_API_URL}/admin/live-control`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
       ])
 
       setStats(statsRes.data)
       setUsers(usersRes.data)
       setLogs(logsRes.data)
+      setLiveControl(liveControlRes.data)
+      setControlForm(liveControlRes.data.control)
     } catch (err) {
       console.error('Failed to fetch admin data:', err)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const updateControl = (field: string, value: boolean) => {
+    setControlForm((current: any) => ({ ...current, [field]: value }))
+  }
+
+  const saveLiveControl = async () => {
+    const token = localStorage.getItem('access_token')
+    if (!token || !controlForm) return
+    setControlSaving(true)
+    setControlMessage('')
+    try {
+      const response = await axios.patch(`${process.env.NEXT_PUBLIC_API_URL}/admin/live-control`, {
+        live_trading_allowed: controlForm.live_trading_allowed,
+        new_live_entries_allowed: controlForm.new_live_entries_allowed,
+        broker_demo_trading_allowed: controlForm.broker_demo_trading_allowed,
+        paper_trading_allowed: controlForm.paper_trading_allowed,
+        live_position_management_allowed: controlForm.live_position_management_allowed,
+        reason: controlReason,
+        confirmation: controlConfirmation,
+      }, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      setLiveControl(response.data)
+      setControlForm(response.data.control)
+      setControlReason('')
+      setControlConfirmation('')
+      setControlMessage('Live trading controls saved.')
+    } catch (err: any) {
+      setControlMessage(err?.response?.data?.detail || 'Could not save live trading controls.')
+    } finally {
+      setControlSaving(false)
     }
   }
 
@@ -204,30 +248,93 @@ export default function AdminPage() {
         {/* Settings Tab */}
         {tab === 'settings' && (
           <div>
-            <h2 className="text-2xl font-bold mb-8">Global Settings</h2>
-            <div className="card max-w-2xl">
+            <h2 className="text-2xl font-bold mb-8">Live Trading Control</h2>
+            {controlMessage && <div className="mb-5 rounded-md border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-slate-200">{controlMessage}</div>}
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+              <div className="card">
+                <h3 className="text-lg font-semibold text-white">Platform status</h3>
+                <div className="mt-5 space-y-4">
+                  {[
+                    ['live_trading_allowed', 'Global live permission'],
+                    ['new_live_entries_allowed', 'New live entries allowed'],
+                    ['broker_demo_trading_allowed', 'Broker-demo trading allowed'],
+                    ['paper_trading_allowed', 'Paper trading allowed'],
+                    ['live_position_management_allowed', 'Live position management allowed'],
+                  ].map(([field, label]) => (
+                    <label key={field} className="flex items-center justify-between gap-4 rounded-md border border-slate-700 px-4 py-3">
+                      <span>
+                        <span className="block text-sm font-semibold text-slate-100">{label}</span>
+                        <span className="text-xs text-slate-400">{controlForm?.[field] ? 'Allowed' : 'Paused'}</span>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(controlForm?.[field])}
+                        onChange={(event) => updateControl(field, event.target.checked)}
+                        className="h-5 w-5 accent-blue-500"
+                      />
+                    </label>
+                  ))}
+                </div>
+
+                <div className="mt-6 grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-200">Reason</label>
+                    <textarea className="input-base mt-2 min-h-24" value={controlReason} onChange={(event) => setControlReason(event.target.value)} placeholder="Why is this control changing?" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-200">Typed confirmation</label>
+                    <input className="input-base mt-2" value={controlConfirmation} onChange={(event) => setControlConfirmation(event.target.value)} placeholder="CONFIRM" />
+                    <p className="mt-2 text-xs text-slate-400">Changing platform trading permissions requires CONFIRM.</p>
+                  </div>
+                </div>
+                <button type="button" disabled={controlSaving || controlConfirmation.trim().toUpperCase() !== 'CONFIRM' || controlReason.trim().length < 5} onClick={() => void saveLiveControl()} className="btn-primary mt-5">
+                  {controlSaving ? 'Saving...' : 'Save live controls'}
+                </button>
+              </div>
+
               <div className="space-y-6">
-                <div className="border-b border-slate-700 pb-6">
-                  <label className="block font-medium mb-2">Enable Live Trading Globally</label>
-                  <p className="text-slate-400 text-sm mb-4">
-                    When disabled, no users can execute live trades regardless of individual settings.
-                  </p>
-                  <button className="btn-primary">
-                    Currently: DISABLED
-                  </button>
+                <div className="card">
+                  <h3 className="text-sm font-semibold text-white">Account summary</h3>
+                  <dl className="mt-4 space-y-3 text-sm">
+                    {[
+                      ['Connected live accounts', liveControl?.account_summary?.connected_live_accounts],
+                      ['Connected demo accounts', liveControl?.account_summary?.connected_demo_accounts],
+                      ['Open live positions', liveControl?.account_summary?.open_live_positions],
+                      ['Pending live orders', liveControl?.account_summary?.pending_live_orders],
+                      ['Unknown execution states', liveControl?.account_summary?.unknown_execution_states],
+                      ['Reconciliation mismatches', liveControl?.account_summary?.reconciliation_mismatches],
+                    ].map(([label, value]) => (
+                      <div key={label} className="flex justify-between gap-4 border-b border-slate-800 pb-2">
+                        <dt className="text-slate-400">{label}</dt>
+                        <dd className="font-semibold text-slate-100">{value ?? 0}</dd>
+                      </div>
+                    ))}
+                  </dl>
                 </div>
 
-                <div className="border-b border-slate-700 pb-6">
-                  <label className="block font-medium mb-2">Default Risk Per Trade (%)</label>
-                  <input type="number" defaultValue={1} className="input-base w-32" />
+                <div className="card">
+                  <h3 className="text-sm font-semibold text-white">System health</h3>
+                  <dl className="mt-4 space-y-3 text-sm">
+                    {Object.entries(liveControl?.health || {}).map(([label, value]) => (
+                      <div key={label} className="flex justify-between gap-4 border-b border-slate-800 pb-2">
+                        <dt className="capitalize text-slate-400">{label.replace(/_/g, ' ')}</dt>
+                        <dd className="font-semibold text-slate-100">{String(value)}</dd>
+                      </div>
+                    ))}
+                  </dl>
                 </div>
 
-                <div className="border-b border-slate-700 pb-6">
-                  <label className="block font-medium mb-2">Max Daily Loss (%)</label>
-                  <input type="number" defaultValue={3} className="input-base w-32" />
+                <div className="card">
+                  <h3 className="text-sm font-semibold text-white">Recent control changes</h3>
+                  <div className="mt-4 max-h-72 space-y-3 overflow-y-auto">
+                    {(liveControl?.recent_audit || []).length ? liveControl.recent_audit.map((audit: any) => (
+                      <div key={audit.id} className="rounded-md border border-slate-800 px-3 py-2 text-xs text-slate-300">
+                        <p className="font-semibold text-slate-100">{new Date(audit.created_at).toLocaleString()}</p>
+                        <p className="mt-1 text-slate-400">{audit.changes?.reason || 'No reason recorded'}</p>
+                      </div>
+                    )) : <p className="text-sm text-slate-400">No owner control changes yet.</p>}
+                  </div>
                 </div>
-
-                <button className="btn-primary">Save Settings</button>
               </div>
             </div>
           </div>

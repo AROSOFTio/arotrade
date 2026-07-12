@@ -8,6 +8,7 @@ from app.config import settings
 from app.services import metaapi
 from app.services.execution import PaperBroker, evaluate_signal_for_execution, utc_now
 from app.services.notify import notify_signal_event
+from app.services import trading_control
 
 router = APIRouter()
 
@@ -190,18 +191,15 @@ async def execute_signal_demo(
     db: Session = Depends(get_db)
 ):
     """Create a clearly labelled paper trade after deterministic signal checks pass."""
-    if not settings.PAPER_TRADING_ENABLED:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Paper trading is disabled")
+    control = trading_control.get_platform_control(db)
+    paper_reason = trading_control.paper_block_reason(control)
+    if paper_reason:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=paper_reason)
 
     signal = _get_user_signal(signal_id, current_user["user_id"], db)
     user = db.query(models.User).filter(models.User.id == current_user["user_id"]).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    if user.trading_mode != models.TradingMode.DEMO:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Switch to demo mode before executing a paper trade"
-        )
 
     existing_trade = db.query(models.Trade).filter(
         models.Trade.signal_id == signal.id,
@@ -295,6 +293,11 @@ async def execute_signal_live(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
+    control = trading_control.get_platform_control(db)
+    platform_reason = trading_control.live_entry_block_reason(control)
+    if platform_reason:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=platform_reason)
+
     if not user.enable_live_trading or not user.accepted_live_disclaimer:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -335,11 +338,55 @@ async def execute_signal_live(
     ).first()
     if not account or not account.metaapi_account_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connected broker account not found")
+    if account.account_type != models.TradingMode.LIVE:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Select a verified LIVE broker account. Demo broker accounts cannot receive real-money orders."
+        )
     if account.connection_state != "deployed":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Broker account is not deployed - deploy it on the Broker accounts page first"
         )
+
+    try:
+        quote = metaapi.get_symbol_price(account.metaapi_account_id, signal.symbol)
+    except metaapi.MetaApiError as exc:
+        db.add(models.ExecutionAudit(
+            user_id=user.id,
+            signal_id=signal.id,
+            broker=account.broker,
+            mode=models.TradingMode.LIVE.value,
+            outcome="rejected",
+            reason=str(exc),
+            details={"broker_account_id": account.id, "validation": "broker_quote"},
+        ))
+        db.commit()
+        raise HTTPException(status_code=exc.status_code if exc.status_code >= 400 else 502, detail=f"Broker quote is missing or stale: {exc}")
+
+    observed_price = _quote_observed_price(quote, signal.signal_type)
+    if observed_price <= 0:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Broker quote is missing or stale")
+
+    result = evaluate_signal_for_execution(signal, user, open_trade_count, observed_price)
+    if not result.eligible:
+        db.add(models.ExecutionAudit(
+            user_id=user.id,
+            signal_id=signal.id,
+            broker=account.broker,
+            mode=models.TradingMode.LIVE.value,
+            outcome="blocked",
+            reason="; ".join(result.reasons),
+            details={
+                "volume": request.volume,
+                "broker_account_id": account.id,
+                "observed_price": observed_price,
+                "broker_quote": quote,
+                "calculated_risk_reward": result.calculated_risk_reward,
+            },
+        ))
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=result.reasons)
 
     client_order_id = f"arotrade-live-{uuid4()}"
     try:
@@ -407,6 +454,17 @@ async def execute_signal_live(
             "metaapi_response": order_result,
         },
     ))
+
+
+def _quote_observed_price(quote: dict, direction: str) -> float:
+    bid = quote.get("bid") or quote.get("brokerBid")
+    ask = quote.get("ask") or quote.get("brokerAsk")
+    price = ask if direction == "buy" else bid
+    price = price or quote.get("price") or quote.get("last") or quote.get("close")
+    try:
+        return float(price)
+    except (TypeError, ValueError):
+        return 0.0
     notify_signal_event(db, user, signal, "executed_live")
     db.commit()
     db.refresh(trade)

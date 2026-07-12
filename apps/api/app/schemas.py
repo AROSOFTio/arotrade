@@ -52,6 +52,31 @@ class LiveTradingUpdate(BaseModel):
     accept_risk_disclaimer: bool = False
 
 
+class PlatformTradingControlUpdate(BaseModel):
+    live_trading_allowed: Optional[bool] = None
+    new_live_entries_allowed: Optional[bool] = None
+    broker_demo_trading_allowed: Optional[bool] = None
+    paper_trading_allowed: Optional[bool] = None
+    live_position_management_allowed: Optional[bool] = None
+    reason: str = Field(min_length=5, max_length=500)
+    confirmation: str = Field(min_length=3, max_length=32)
+
+    @model_validator(mode="after")
+    def validate_control_change(self):
+        update_fields = (
+            self.live_trading_allowed,
+            self.new_live_entries_allowed,
+            self.broker_demo_trading_allowed,
+            self.paper_trading_allowed,
+            self.live_position_management_allowed,
+        )
+        if all(value is None for value in update_fields):
+            raise ValueError("At least one platform control value must be provided")
+        if self.confirmation.strip().upper() != "CONFIRM":
+            raise ValueError("Type CONFIRM to change platform trading permissions")
+        return self
+
+
 class BrokerAccountCreate(BaseModel):
     broker: str = Field(min_length=2, max_length=50)
     account_id: str = Field(min_length=2, max_length=255)
