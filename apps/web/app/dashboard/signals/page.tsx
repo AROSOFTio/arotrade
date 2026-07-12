@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Check, Play, Plus, Search, X, Zap, Sliders, ToggleLeft, ToggleRight, Loader2, Sparkles, RefreshCw, Trash2 } from 'lucide-react'
+import { Check, Play, Plus, Search, X, Zap, Sliders, Loader2, Sparkles, RefreshCw, Trash2 } from 'lucide-react'
 
 import { apiRequest, errorMessage, formatDate, formatNumber } from '../../components/api'
 import { EmptyState } from '../../components/empty-state'
@@ -83,8 +83,8 @@ type ScannerProfile = {
   minimum_confidence: number
   minimum_risk_reward: number
   max_spread_points: number
-  approval_required: bool
-  scan_enabled: bool
+  approval_required: boolean
+  scan_enabled: boolean
   maximum_signal_age_minutes: number
   created_at: string
 }
