@@ -455,6 +455,11 @@ async def execute_signal_live(
         },
     ))
 
+    notify_signal_event(db, user, signal, "executed_live")
+    db.commit()
+    db.refresh(trade)
+    return trade
+
 
 def _quote_observed_price(quote: dict, direction: str) -> float:
     bid = quote.get("bid") or quote.get("brokerBid")
@@ -465,7 +470,3 @@ def _quote_observed_price(quote: dict, direction: str) -> float:
         return float(price)
     except (TypeError, ValueError):
         return 0.0
-    notify_signal_event(db, user, signal, "executed_live")
-    db.commit()
-    db.refresh(trade)
-    return trade

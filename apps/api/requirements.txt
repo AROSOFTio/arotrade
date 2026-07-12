@@ -35,9 +35,11 @@ google-generativeai==0.8.5
 # groq==0.4.1  # Future
 # anthropic==0.7.10  # Future
 
-# Trading
-# deriv-api==1.0.0  # Use websocket instead
-websocket-client==1.6.4
+# Trading integrations
+# MetaApi for MT4/MT5 connectivity — the ONLY broker integration for MT5 accounts
+# metaapi-cloud-sdk>=27.0.0  # Full async SDK — uncomment for streaming
+# Using httpx REST calls (metaapi_gateway.py) for simplicity in Celery context
+websocket-client==1.6.4  # Retained for any direct WS needs
 
 # Utilities
 python-dotenv==1.0.0

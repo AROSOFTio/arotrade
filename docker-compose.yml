@@ -1,5 +1,56 @@
 version: '3.8'
 
+# ============================================================================
+# AroTrade AI — Docker Compose (Local Development / VPS)
+#
+# Services:
+#   postgres  — PostgreSQL database
+#   redis     — Redis for Celery broker and cache
+#   api       — FastAPI backend (runs migrations on start)
+#   worker    — Celery worker (background tasks: scanner, reconciliation)
+#   beat      — Celery Beat scheduler (triggers periodic tasks)
+#   web       — Next.js frontend
+#
+# DO NOT use this file for Coolify deployments.
+# Coolify uses its own auto-generated docker-compose.yaml at the server.
+# ============================================================================
+
+# Shared environment block
+x-api-env: &api-env
+  PYTHONUNBUFFERED: 1
+  APP_ENV: ${APP_ENV:-production}
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: 5432
+  POSTGRES_DB: ${POSTGRES_DB:-arotrade}
+  POSTGRES_USER: ${POSTGRES_USER:-arotrade}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
+  REDIS_URL: redis://redis:6379/0
+  JWT_SECRET: ${JWT_SECRET:-change_me}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:-change_me_32_char_key}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+  METAAPI_TOKEN: ${METAAPI_TOKEN:-}
+  METAAPI_REGION: ${METAAPI_REGION:-london}
+  ENABLE_LIVE_TRADING: ${ENABLE_LIVE_TRADING:-false}
+  ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
+  # Scanner
+  SCANNER_ENABLED: ${SCANNER_ENABLED:-true}
+  SCANNER_DEFAULT_INTERVAL_SECONDS: ${SCANNER_DEFAULT_INTERVAL_SECONDS:-60}
+  SIGNAL_ENTRY_MONITOR_ENABLED: ${SIGNAL_ENTRY_MONITOR_ENABLED:-true}
+  QUOTE_STALE_AFTER_SECONDS: ${QUOTE_STALE_AFTER_SECONDS:-10}
+  # Risk
+  MIN_SIGNAL_CONFIDENCE: ${MIN_SIGNAL_CONFIDENCE:-70}
+  MIN_SIGNAL_RISK_REWARD: ${MIN_SIGNAL_RISK_REWARD:-1.5}
+  MAX_LIVE_ORDER_VOLUME: ${MAX_LIVE_ORDER_VOLUME:-1.0}
+  # Notifications
+  SMTP_HOST: ${SMTP_HOST:-}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-noreply@arotrader.com}
+  SMTP_FROM_NAME: ${SMTP_FROM_NAME:-AroTrade AI}
+  APP_URL: ${APP_URL:-http://localhost:3000}
+
 services:
   # PostgreSQL Database
   postgres:
@@ -40,22 +91,7 @@ services:
       dockerfile: Dockerfile
     container_name: arotrade-api
     environment:
-      PYTHONUNBUFFERED: 1
-      APP_ENV: ${APP_ENV:-production}
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: ${POSTGRES_DB:-arotrade}
-      POSTGRES_USER: ${POSTGRES_USER:-arotrade}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
-      REDIS_URL: redis://redis:6379/0
-      JWT_SECRET: ${JWT_SECRET:-change_me}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-change_me_32_char_key}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
-      DERIV_APP_ID: ${DERIV_APP_ID:-}
-      DERIV_API_TOKEN_DEMO: ${DERIV_API_TOKEN_DEMO:-}
-      ENABLE_LIVE_TRADING: ${ENABLE_LIVE_TRADING:-false}
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
+      <<: *api-env
     expose:
       - "8000"
     depends_on:
@@ -76,28 +112,42 @@ services:
       "
 
   # Celery Worker (Background Tasks)
+  # Handles: scanner pipeline, reconciliation, notifications
   worker:
     build:
       context: ./apps/api
       dockerfile: Dockerfile
     container_name: arotrade-worker
     environment:
-      PYTHONUNBUFFERED: 1
-      APP_ENV: ${APP_ENV:-production}
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: ${POSTGRES_DB:-arotrade}
-      POSTGRES_USER: ${POSTGRES_USER:-arotrade}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
-      REDIS_URL: redis://redis:6379/0
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      <<: *api-env
     depends_on:
-      - postgres
-      - redis
-      - api
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
     restart: unless-stopped
-    command: celery -A app.workers.celery_app worker -l info
+    command: celery -A app.workers.celery_app worker -l info -Q scanner,reconcile,notify,celery
+    healthcheck:
+      disable: true
+
+  # Celery Beat Scheduler
+  # Triggers: scanner every 60s, reconciliation every 5m, expiry every 5m
+  beat:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: arotrade-beat
+    environment:
+      <<: *api-env
+    depends_on:
+      redis:
+        condition: service_healthy
+      worker:
+        condition: service_started
+    restart: unless-stopped
+    command: celery -A app.workers.celery_app beat -l info --scheduler celery.beat:PersistentScheduler
     healthcheck:
       disable: true
 
@@ -118,7 +168,8 @@ services:
     expose:
       - "3000"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
@@ -126,4 +177,3 @@ volumes:
     driver: local
   redis_data:
     driver: local
-

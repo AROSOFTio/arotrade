@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, JSON, Enum
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, JSON, Enum, UniqueConstraint, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime
@@ -21,6 +21,32 @@ class SignalStatus(str, enum.Enum):
     EXECUTED_LIVE = "executed_live"
     EXPIRED = "expired"
     CANCELLED = "cancelled"
+
+
+class SignalLifecycleStatus(str, enum.Enum):
+    """Full signal lifecycle — replaces the coarse SignalStatus for auto signals."""
+    DETECTED = "detected"
+    VALIDATING = "validating"
+    PENDING_APPROVAL = "pending_approval"
+    APPROVED_WAITING_ENTRY = "approved_waiting_entry"
+    TRIGGERED = "triggered"
+    EXECUTION_PENDING = "execution_pending"
+    SUBMITTED = "submitted"
+    FILLED = "filled"
+    OPEN = "open"
+    REJECTED = "rejected"
+    BLOCKED = "blocked"
+    EXPIRED = "expired"
+    CANCELLED = "cancelled"
+    CLOSED = "closed"
+    FAILED = "failed"
+
+
+class ExecutionMode(str, enum.Enum):
+    """Distinct execution modes — never confuse paper sim with broker orders."""
+    PAPER = "paper"           # Internal simulation — no broker involved
+    BROKER_DEMO = "broker_demo"  # Real MetaApi order on an MT5 demo account
+    LIVE = "live"             # Real MetaApi order on an MT5 live account
 
 
 class TradeStatus(str, enum.Enum):
@@ -73,6 +99,7 @@ class User(Base):
     journal_entries = relationship("JournalEntry", back_populates="user", cascade="all, delete-orphan")
     audit_logs = relationship("AuditLog", back_populates="user", cascade="all, delete-orphan")
     execution_audits = relationship("ExecutionAudit", back_populates="user", cascade="all, delete-orphan")
+    scanner_profiles = relationship("ScannerProfile", back_populates="user", cascade="all, delete-orphan")
 
 
 class UserSession(Base):
@@ -203,14 +230,30 @@ class Signal(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     analysis_id = Column(Integer, ForeignKey("ai_analyses.id"), nullable=True)
 
-    symbol = Column(String(20), nullable=False)
-    timeframe = Column(String(10), nullable=False)
-    signal_type = Column(String(20), nullable=False)  # buy, sell
+    # Source metadata (populated for auto-signals)
+    source = Column(String(20), nullable=True)          # "manual" or "auto"
+    scanner_profile_id = Column(Integer, ForeignKey("scanner_profiles.id"), nullable=True)
+    strategy_id = Column(Integer, nullable=True)        # FK to strategies.id
+    broker_account_id = Column(Integer, ForeignKey("broker_accounts.id"), nullable=True)
 
-    # Entry/Exit
-    entry_min = Column(Float, nullable=False)
-    entry_max = Column(Float, nullable=False)
-    stop_loss = Column(Float, nullable=False)
+    # Symbols — both canonical and exact broker symbol
+    symbol = Column(String(30), nullable=False)         # canonical display symbol
+    canonical_symbol = Column(String(30), nullable=True)
+    broker_symbol = Column(String(30), nullable=True)   # exact broker symbol (e.g. XAUUSDm)
+    timeframe = Column(String(10), nullable=False)
+    signal_type = Column(String(20), nullable=False)    # buy, sell
+
+    # Source candle close time (used for fingerprint deduplication)
+    source_candle_time = Column(DateTime, nullable=True)
+
+    # Prices
+    detected_price = Column(Float, nullable=True)       # price when signal was detected
+    latest_price = Column(Float, nullable=True)         # last refreshed broker price
+
+    # Entry/Exit levels
+    entry_min = Column(Float, nullable=True)
+    entry_max = Column(Float, nullable=True)
+    stop_loss = Column(Float, nullable=True)
     take_profit_1 = Column(Float, nullable=True)
     take_profit_2 = Column(Float, nullable=True)
     take_profit_3 = Column(Float, nullable=True)
@@ -218,16 +261,45 @@ class Signal(Base):
     risk_reward = Column(Float, nullable=True)
     confidence = Column(Integer, default=50)
 
+    # Legacy status (kept for backward compat)
     status = Column(Enum(SignalStatus), default=SignalStatus.PENDING)
+
+    # Full lifecycle status for auto-signals
+    lifecycle_status = Column(String(30), nullable=True)  # detected/validating/pending_approval/...
+
     notes = Column(Text, nullable=True)
 
+    # AI/Strategy reasoning (JSON arrays)
+    reasoning = Column(JSON, nullable=True)             # list[str] of reasons
+    invalidation = Column(Text, nullable=True)          # condition that voids this signal
+    news_warning = Column(Text, nullable=True)          # upcoming news risk
+
+    # Deduplication fingerprint
+    # Built from: scanner_profile_id + broker_account_id + broker_symbol + timeframe +
+    #             strategy_id + candle_close_time + direction
+    # Unique constraint ensures the same closed candle never generates duplicate signals
+    fingerprint = Column(String(128), nullable=True, index=True)
+    blocked_reason = Column(Text, nullable=True)
+
+    # Approval action
+    approved_action = Column(String(30), nullable=True)  # "wait_for_entry" or "jump_in_now"
+
+    # Timestamps
     created_at = Column(DateTime, server_default=func.now())
     approved_at = Column(DateTime, nullable=True)
+    triggered_at = Column(DateTime, nullable=True)
+    execution_started_at = Column(DateTime, nullable=True)
     executed_at = Column(DateTime, nullable=True)
     expired_at = Column(DateTime, nullable=True)
     valid_until = Column(DateTime, nullable=True)
 
     user = relationship("User", back_populates="signals")
+    scanner_profile = relationship("ScannerProfile", foreign_keys=[scanner_profile_id])
+    broker_account = relationship("BrokerAccount", foreign_keys=[broker_account_id])
+
+    __table_args__ = (
+        UniqueConstraint("fingerprint", name="uq_signal_fingerprint"),
+    )
 
 
 class Strategy(Base):
@@ -457,3 +529,176 @@ class AdminSetting(Base):
     description = Column(String(255), nullable=True)
 
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+# ---------------------------------------------------------------------------
+# BrokerSymbol — canonical-to-broker symbol mapping with full specification
+# ---------------------------------------------------------------------------
+
+class BrokerSymbol(Base):
+    """
+    Maps a canonical symbol name (e.g. XAUUSD) to the exact symbol name used
+    by a specific broker account (e.g. XAUUSDm, GOLD, XAUUSDa).
+
+    Never assume broker symbol names.  Always look up this table before
+    sending a candle request, signal, or order to MetaApi.
+    """
+    __tablename__ = "broker_symbols"
+
+    id = Column(Integer, primary_key=True, index=True)
+    broker_account_id = Column(Integer, ForeignKey("broker_accounts.id"), nullable=False, index=True)
+    canonical_symbol = Column(String(30), nullable=False, index=True)  # XAUUSD, US30, BTCUSD
+    broker_symbol = Column(String(30), nullable=False)                 # XAUUSDm, US30.cash, BTCUSDm
+    display_name = Column(String(100), nullable=True)
+    category = Column(String(30), nullable=True)  # forex, metals, indices, crypto, synthetic
+
+    # Symbol specification (populated from MetaApi)
+    digits = Column(Integer, nullable=True)
+    point = Column(Float, nullable=True)
+    tick_size = Column(Float, nullable=True)
+    tick_value = Column(Float, nullable=True)
+    contract_size = Column(Float, nullable=True)
+    volume_min = Column(Float, nullable=True)
+    volume_max = Column(Float, nullable=True)
+    volume_step = Column(Float, nullable=True)
+    trade_allowed = Column(Boolean, default=True)
+
+    last_refreshed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    broker_account = relationship("BrokerAccount", foreign_keys=[broker_account_id])
+
+    __table_args__ = (
+        UniqueConstraint("broker_account_id", "broker_symbol", name="uq_broker_symbol_per_account"),
+        Index("ix_broker_symbol_lookup", "broker_account_id", "canonical_symbol"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# ScannerProfile — per-user automatic scanner configuration
+# ---------------------------------------------------------------------------
+
+class ScannerProfile(Base):
+    """
+    A user's scanner configuration.  One profile = one broker account + a set
+    of symbols, timeframes, strategies, and risk parameters.
+
+    execution_mode is STRICTLY separated:
+      - paper        = internal paper simulation (no broker order)
+      - broker_demo  = real MetaApi order on an MT5 demo account
+      - live         = real MetaApi order on an MT5 live account
+    """
+    __tablename__ = "scanner_profiles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    broker_account_id = Column(Integer, ForeignKey("broker_accounts.id"), nullable=True, index=True)
+
+    name = Column(String(100), nullable=False)
+    execution_mode = Column(String(20), nullable=False, default=ExecutionMode.PAPER.value)
+
+    # What to scan
+    symbols = Column(JSON, nullable=True)          # list[str] of canonical symbols
+    timeframes = Column(JSON, nullable=True)        # list[str] e.g. ["H1", "H4"]
+    active_strategy_ids = Column(JSON, nullable=True)  # list[int]
+
+    # Quality filters
+    minimum_confidence = Column(Float, default=70.0)
+    minimum_risk_reward = Column(Float, default=1.5)
+    max_spread_points = Column(Float, nullable=True)
+    maximum_signal_age_minutes = Column(Integer, default=240)
+
+    # Risk
+    risk_percent = Column(Float, default=0.5)
+
+    # News blackout
+    news_block_before_minutes = Column(Integer, default=30)
+    news_block_after_minutes = Column(Integer, default=30)
+
+    # Feature flags
+    scan_enabled = Column(Boolean, default=False)
+    approval_required = Column(Boolean, default=True)
+
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    user = relationship("User", back_populates="scanner_profiles")
+    broker_account = relationship("BrokerAccount", foreign_keys=[broker_account_id])
+
+
+# ---------------------------------------------------------------------------
+# Signal — extended with broker fields and full lifecycle
+# ---------------------------------------------------------------------------
+# NOTE: The original Signal class at line ~225 remains unchanged for backward
+# compatibility.  New auto-signals use the extended fields below.
+# We ADD columns via migration; the ORM class here reflects the FINAL schema.
+# The Signal class is extended in-place — these patches are applied via
+# Alembic migration 005_scanner_signal_lifecycle.py.
+#
+# Fields added (all nullable for backward compat):
+#   source, lifecycle_status, scanner_profile_id, strategy_id,
+#   broker_account_id, canonical_symbol, broker_symbol, source_candle_time,
+#   detected_price, latest_price, entry_min, entry_max, reasoning,
+#   invalidation, news_warning, fingerprint, approved_action,
+#   triggered_at, execution_started_at, expired_at, blocked_reason
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# ExecutionIntent — idempotency guard for broker orders
+# ---------------------------------------------------------------------------
+
+class ExecutionIntent(Base):
+    """
+    Created BEFORE calling MetaApi.  Prevents duplicate orders after:
+      - Network timeout
+      - Celery retry
+      - Worker restart
+      - API restart
+
+    Unique constraint: one active intent per (signal_id, execution_mode).
+    """
+    __tablename__ = "execution_intents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    signal_id = Column(Integer, ForeignKey("signals.id"), nullable=False, index=True)
+    broker_account_id = Column(Integer, ForeignKey("broker_accounts.id"), nullable=True)
+
+    execution_mode = Column(String(20), nullable=False)  # paper / broker_demo / live
+    client_order_id = Column(String(64), unique=True, nullable=False)
+
+    # Sizing inputs (all stored for audit)
+    requested_volume = Column(Float, nullable=True)
+    requested_price = Column(Float, nullable=True)
+    equity_at_time = Column(Float, nullable=True)
+    risk_percent_at_time = Column(Float, nullable=True)
+    tick_size_at_time = Column(Float, nullable=True)
+    tick_value_at_time = Column(Float, nullable=True)
+    stop_loss_distance = Column(Float, nullable=True)
+    loss_per_lot = Column(Float, nullable=True)
+    raw_volume = Column(Float, nullable=True)
+
+    # Execution state
+    status = Column(String(30), nullable=False, default="pending")  # pending/submitted/filled/failed/duplicate
+    broker_order_id = Column(String(255), nullable=True)
+    broker_position_id = Column(String(255), nullable=True)
+    request_payload = Column(JSON, nullable=True)
+    broker_response = Column(JSON, nullable=True)
+    error = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    user = relationship("User", foreign_keys=[user_id])
+    signal = relationship("Signal", foreign_keys=[signal_id])
+    broker_account = relationship("BrokerAccount", foreign_keys=[broker_account_id])
+
+    __table_args__ = (
+        UniqueConstraint(
+            "signal_id", "execution_mode",
+            name="uq_one_active_intent_per_signal_mode",
+        ),
+    )
+

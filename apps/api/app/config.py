@@ -88,6 +88,23 @@ class Settings(BaseSettings):
     AUDIT_LOG_ENABLED: bool = True
     AUDIT_LOG_RETENTION_DAYS: int = 90
 
+    # Automatic Scanner
+    SCANNER_ENABLED: bool = True
+    SCANNER_DEFAULT_INTERVAL_SECONDS: int = 60
+    QUOTE_STALE_AFTER_SECONDS: int = 10
+    SIGNAL_ENTRY_MONITOR_ENABLED: bool = True
+
+    # Scanner defaults for new profiles
+    SCANNER_DEFAULT_RISK_PERCENT: float = 0.5
+    SCANNER_DEFAULT_MAX_POSITIONS: int = 1
+    SCANNER_DEFAULT_APPROVAL_REQUIRED: bool = True
+
+    # Market Streaming
+    MARKET_STREAM_ENABLED: bool = True
+
+    # Celery Beat
+    CELERY_BEAT_ENABLED: bool = True
+
     class Config:
         env_file = ".env"
         case_sensitive = True
