@@ -18,11 +18,12 @@ redis_client = redis.Redis.from_url(settings.REDIS_URL)
 try:
     from metaapi_cloud_sdk import MetaApi
     from metaapi_cloud_sdk.clients.metaapi.synchronization_listener import SynchronizationListener
-except ImportError:
-    # Fallback/stub for local environment testing where SDK might not be installed yet
-    class SynchronizationListener:
-        pass
-    logger.warning("metaapi_cloud_sdk not found in this environment. Falling back to stub listener.")
+except ImportError as exc:
+    raise RuntimeError("metaapi_cloud_sdk is required for the production market streamer.") from exc
+
+
+def _enum_value(value):
+    return getattr(value, "value", value)
 
 
 class MarketDataListener(SynchronizationListener):
@@ -44,6 +45,8 @@ class MarketDataListener(SynchronizationListener):
 
             quote_data = {
                 "symbol": symbol,
+                "broker_account_id": self.local_account_id,
+                "exact_broker_symbol": symbol,
                 "bid": float(bid),
                 "ask": float(ask),
                 "spread": float(ask - bid),
@@ -52,7 +55,7 @@ class MarketDataListener(SynchronizationListener):
             }
 
             # Cache in Redis with a TTL of 30 seconds
-            cache_key = f"quote:{self.local_account_id}:{symbol.upper()}"
+            cache_key = f"mt5:quote:{self.local_account_id}:{symbol.upper()}"
             redis_client.set(cache_key, json.dumps(quote_data), ex=30)
 
             # Publish update on Redis pubsub
@@ -66,6 +69,69 @@ class MarketDataListener(SynchronizationListener):
         """Callback from MetaApi when candles update."""
         # Optional: cache M1/H1 candles if needed, otherwise rely on REST API
         pass
+
+
+def resolve_symbols_to_stream(db: Session, local_account: models.BrokerAccount) -> set[str]:
+    """
+    Resolve exact broker symbols that need streaming for this account.
+
+    Sources:
+      - Enabled scanner profiles for the account
+      - Approved signals waiting for entry
+      - Open broker-demo/live trades
+    """
+    local_id = local_account.id
+    broker_symbols: set[str] = set()
+    canonical_symbols: set[str] = set()
+
+    profiles = db.query(models.ScannerProfile).filter(
+        models.ScannerProfile.broker_account_id == local_id,
+        models.ScannerProfile.scan_enabled == True,  # noqa: E712
+    ).all()
+    for profile in profiles:
+        for symbol in profile.symbols or []:
+            if symbol:
+                canonical_symbols.add(str(symbol).upper())
+
+    approved_signals = db.query(models.Signal).filter(
+        models.Signal.broker_account_id == local_id,
+        models.Signal.status == models.SignalStatus.APPROVED,
+    ).all()
+    for signal in approved_signals:
+        if signal.broker_symbol:
+            broker_symbols.add(signal.broker_symbol)
+        elif signal.canonical_symbol or signal.symbol:
+            canonical_symbols.add(str(signal.canonical_symbol or signal.symbol).upper())
+
+    open_trades = db.query(models.Trade).filter(
+        models.Trade.broker_account_id == local_id,
+        models.Trade.status == models.TradeStatus.OPEN,
+        models.Trade.execution_mode.in_([
+            models.ExecutionMode.BROKER_DEMO.value,
+            models.ExecutionMode.LIVE.value,
+        ]),
+    ).all()
+    for trade in open_trades:
+        if trade.broker_symbol:
+            broker_symbols.add(trade.broker_symbol)
+
+    if canonical_symbols:
+        rows = db.query(models.BrokerSymbol).filter(
+            models.BrokerSymbol.broker_account_id == local_id,
+            models.BrokerSymbol.canonical_symbol.in_(canonical_symbols),
+            models.BrokerSymbol.trade_allowed == True,  # noqa: E712
+        ).all()
+        resolved = {row.canonical_symbol for row in rows}
+        broker_symbols.update(row.broker_symbol for row in rows if row.broker_symbol)
+        unresolved = canonical_symbols - resolved
+        for symbol in sorted(unresolved):
+            logger.warning(
+                "Streamer cannot resolve exact broker symbol for %s on account %s",
+                symbol,
+                local_id,
+            )
+
+    return broker_symbols
 
 
 async def stream_for_account(api: MetaApi, local_account: models.BrokerAccount):
@@ -89,40 +155,28 @@ async def stream_for_account(api: MetaApi, local_account: models.BrokerAccount):
         await connection.wait_synchronized()
         logger.info("Streaming connection synchronized for account %s", metaapi_account_id)
 
-        # Retrieve symbols to stream
-        db = SessionLocal()
-        try:
-            # 1. Active scanner profile symbols
-            scanner_symbols = [
-                sym[0] for sym in db.query(models.ScannerProfile.broker_symbol)
-                .filter(models.ScannerProfile.is_active == True, models.ScannerProfile.broker_symbol.isnot(None))
-                .distinct().all()
-            ]
-            
-            # 2. Open trades symbols
-            trade_symbols = [
-                t[0] for t in db.query(models.Trade.broker_symbol)
-                .filter(models.Trade.status == models.TradeStatus.OPEN, models.Trade.broker_symbol.isnot(None))
-                .distinct().all()
-            ]
+        subscribed_symbols: set[str] = set()
+        while True:
+            db = SessionLocal()
+            try:
+                symbols_to_stream = resolve_symbols_to_stream(db, local_account)
+            finally:
+                db.close()
 
-            symbols_to_stream = list(set(scanner_symbols + trade_symbols))
             if not symbols_to_stream:
-                # Default fallback watchlist
-                symbols_to_stream = ["EURUSD", "GBPUSD", "XAUUSD", "USDJPY", "BTCUSD"]
-
-            for symbol in symbols_to_stream:
+                logger.info(
+                    "Streamer idle for account %s: no enabled scanner profiles, approved signals, or open broker trades",
+                    metaapi_account_id,
+                )
+            for symbol in sorted(symbols_to_stream - subscribed_symbols):
                 try:
                     logger.info("Subscribing to market data for %s: %s", metaapi_account_id, symbol)
                     await connection.subscribe_to_market_data(symbol)
+                    subscribed_symbols.add(symbol)
                 except Exception as e:
                     logger.error("Failed to subscribe to %s on %s: %s", symbol, metaapi_account_id, e)
-        finally:
-            db.close()
 
-        # Keep connection alive
-        while True:
-            await asyncio.sleep(10)
+            await asyncio.sleep(60)
 
     except Exception as exc:
         logger.error("Streaming connection error for account %s: %s", metaapi_account_id, exc)

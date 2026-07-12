@@ -166,6 +166,8 @@ services:
         condition: service_healthy
     restart: unless-stopped
     command: python -m app.streamer
+    healthcheck:
+      disable: true
 
   # Next.js Frontend
   web:
