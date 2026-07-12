@@ -32,6 +32,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _current_user_id(current_user: dict) -> int:
+    try:
+        return int(current_user["user_id"])
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user session")
+
+
 def get_db():
     db = SessionLocal()
     try:
@@ -110,14 +117,16 @@ def _serialize_profile(profile: models.ScannerProfile) -> dict:
 def create_profile(
     request: ScannerProfileCreate,
     db: Session = Depends(get_db),
-    user: models.User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """Create a new scanner profile."""
+    user_id = _current_user_id(current_user)
+
     # Validate broker account ownership
     if request.broker_account_id:
         account = db.query(models.BrokerAccount).filter(
             models.BrokerAccount.id == request.broker_account_id,
-            models.BrokerAccount.user_id == user.id,
+            models.BrokerAccount.user_id == user_id,
         ).first()
         if not account:
             raise HTTPException(status_code=404, detail="Broker account not found")
@@ -135,7 +144,7 @@ def create_profile(
             )
 
     profile = models.ScannerProfile(
-        user_id=user.id,
+        user_id=user_id,
         **request.model_dump(),
     )
     db.add(profile)
@@ -148,12 +157,13 @@ def create_profile(
 @router.get("/profiles")
 def list_profiles(
     db: Session = Depends(get_db),
-    user: models.User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """List all scanner profiles for the current user."""
+    user_id = _current_user_id(current_user)
     profiles = (
         db.query(models.ScannerProfile)
-        .filter(models.ScannerProfile.user_id == user.id)
+        .filter(models.ScannerProfile.user_id == user_id)
         .order_by(models.ScannerProfile.created_at.desc())
         .all()
     )
@@ -168,11 +178,12 @@ def list_profiles(
 def get_profile(
     profile_id: int,
     db: Session = Depends(get_db),
-    user: models.User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
+    user_id = _current_user_id(current_user)
     profile = db.query(models.ScannerProfile).filter(
         models.ScannerProfile.id == profile_id,
-        models.ScannerProfile.user_id == user.id,
+        models.ScannerProfile.user_id == user_id,
     ).first()
     if not profile:
         raise HTTPException(status_code=404, detail="Scanner profile not found")
@@ -184,11 +195,12 @@ def update_profile(
     profile_id: int,
     request: ScannerProfileUpdate,
     db: Session = Depends(get_db),
-    user: models.User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
+    user_id = _current_user_id(current_user)
     profile = db.query(models.ScannerProfile).filter(
         models.ScannerProfile.id == profile_id,
-        models.ScannerProfile.user_id == user.id,
+        models.ScannerProfile.user_id == user_id,
     ).first()
     if not profile:
         raise HTTPException(status_code=404, detail="Scanner profile not found")
@@ -205,11 +217,12 @@ def update_profile(
 def delete_profile(
     profile_id: int,
     db: Session = Depends(get_db),
-    user: models.User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
+    user_id = _current_user_id(current_user)
     profile = db.query(models.ScannerProfile).filter(
         models.ScannerProfile.id == profile_id,
-        models.ScannerProfile.user_id == user.id,
+        models.ScannerProfile.user_id == user_id,
     ).first()
     if not profile:
         raise HTTPException(status_code=404, detail="Scanner profile not found")
@@ -228,12 +241,13 @@ def delete_profile(
 def enable_scanning(
     profile_id: int,
     db: Session = Depends(get_db),
-    user: models.User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """Enable automatic scanning for this profile."""
+    user_id = _current_user_id(current_user)
     profile = db.query(models.ScannerProfile).filter(
         models.ScannerProfile.id == profile_id,
-        models.ScannerProfile.user_id == user.id,
+        models.ScannerProfile.user_id == user_id,
     ).first()
     if not profile:
         raise HTTPException(status_code=404, detail="Scanner profile not found")
@@ -260,12 +274,13 @@ def enable_scanning(
 def disable_scanning(
     profile_id: int,
     db: Session = Depends(get_db),
-    user: models.User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """Pause automatic scanning for this profile."""
+    user_id = _current_user_id(current_user)
     profile = db.query(models.ScannerProfile).filter(
         models.ScannerProfile.id == profile_id,
-        models.ScannerProfile.user_id == user.id,
+        models.ScannerProfile.user_id == user_id,
     ).first()
     if not profile:
         raise HTTPException(status_code=404, detail="Scanner profile not found")
@@ -280,12 +295,13 @@ def disable_scanning(
 def trigger_scan(
     profile_id: int,
     db: Session = Depends(get_db),
-    user: models.User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """Trigger an immediate on-demand scan for this profile."""
+    user_id = _current_user_id(current_user)
     profile = db.query(models.ScannerProfile).filter(
         models.ScannerProfile.id == profile_id,
-        models.ScannerProfile.user_id == user.id,
+        models.ScannerProfile.user_id == user_id,
     ).first()
     if not profile:
         raise HTTPException(status_code=404, detail="Scanner profile not found")
@@ -311,9 +327,10 @@ def trigger_scan(
 
 @router.get("/strategies")
 def list_strategies(
-    user: models.User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """List all available scanner strategies."""
+    _current_user_id(current_user)
     from app.services.scanner.strategies import list_strategies as _list
     return {"success": True, "strategies": _list()}
 
@@ -321,14 +338,15 @@ def list_strategies(
 @router.get("/status")
 def scanner_status(
     db: Session = Depends(get_db),
-    user: models.User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """Global scanner status for this user."""
     from app.config import settings
+    user_id = _current_user_id(current_user)
 
     profiles = (
         db.query(models.ScannerProfile)
-        .filter(models.ScannerProfile.user_id == user.id)
+        .filter(models.ScannerProfile.user_id == user_id)
         .all()
     )
 
@@ -342,7 +360,7 @@ def scanner_status(
     recent_signals = (
         db.query(models.Signal)
         .filter(
-            models.Signal.user_id == user.id,
+            models.Signal.user_id == user_id,
             models.Signal.source == "auto",
             models.Signal.created_at >= recent_cutoff,
         )

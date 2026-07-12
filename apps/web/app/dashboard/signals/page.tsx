@@ -75,14 +75,15 @@ type LiveBrokerAccount = {
 type ScannerProfile = {
   id: number
   name: string
-  strategy_id: string
-  broker_account_id: number
-  watched_symbols: string[]
-  watched_timeframes: string[]
+  execution_mode: 'paper' | 'broker_demo' | 'live'
+  broker_account_id?: number | null
+  symbols: string[]
+  timeframes: string[]
+  active_strategy_ids: string[]
   risk_percent: number
   minimum_confidence: number
   minimum_risk_reward: number
-  max_spread_points: number
+  max_spread_points?: number | null
   approval_required: boolean
   scan_enabled: boolean
   maximum_signal_age_minutes: number
@@ -116,7 +117,6 @@ export default function SignalsPage() {
   const [scanningProfileId, setScanningProfileId] = useState<number | null>(null)
   const [newProfileForm, setNewProfileForm] = useState({
     name: 'Main Aggressive Scanner',
-    strategy_id: 'default',
     broker_account_id: '',
     watched_symbols_str: 'EURUSD, GBPUSD, XAUUSD',
     watched_timeframes_str: 'M15, H1',
@@ -283,13 +283,17 @@ export default function SignalsPage() {
     try {
       const symbols = newProfileForm.watched_symbols_str.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean)
       const timeframes = newProfileForm.watched_timeframes_str.split(',').map((t) => t.trim().toUpperCase()).filter(Boolean)
-      
+      const selectedAccount = liveAccounts.find((account) => String(account.id) === newProfileForm.broker_account_id)
+      const selectedAccountType = selectedAccount?.account_type.toLowerCase()
+      const executionMode = selectedAccountType === 'live' ? 'live' : selectedAccountType === 'demo' ? 'broker_demo' : 'paper'
+
       const payload = {
         name: newProfileForm.name,
-        strategy_id: newProfileForm.strategy_id,
-        broker_account_id: Number(newProfileForm.broker_account_id),
-        watched_symbols: symbols,
-        watched_timeframes: timeframes,
+        execution_mode: executionMode,
+        broker_account_id: newProfileForm.broker_account_id ? Number(newProfileForm.broker_account_id) : null,
+        symbols,
+        timeframes,
+        active_strategy_ids: [],
         risk_percent: Number(newProfileForm.risk_percent),
         minimum_confidence: Number(newProfileForm.minimum_confidence),
         minimum_risk_reward: Number(newProfileForm.minimum_risk_reward),
@@ -297,12 +301,15 @@ export default function SignalsPage() {
         approval_required: newProfileForm.approval_required,
       }
 
-      await apiRequest('/scanner/profiles', {
+      const response = await apiRequest<{ profile: ScannerProfile }>('/scanner/profiles', {
         method: 'POST',
         body: JSON.stringify(payload),
       })
-      setScannerMessage('Scanner profile created successfully.')
+      await apiRequest(`/scanner/profiles/${response.profile.id}/enable`, { method: 'POST' })
+      await apiRequest(`/scanner/profiles/${response.profile.id}/scan`, { method: 'POST' })
+      setScannerMessage('Scanner profile created, activated, and first scan started.')
       await loadScannerProfiles()
+      await loadSignals()
     } catch (requestError) {
       setScannerError(errorMessage(requestError))
     } finally {
@@ -642,13 +649,14 @@ export default function SignalsPage() {
                           </span>
                         </div>
                         <p className="mt-1 text-xs text-slate-500 truncate">
-                          <strong>Symbols:</strong> {profile.watched_symbols.join(', ')} · <strong>Timeframes:</strong> {profile.watched_timeframes.join(', ')}
+                          <strong>Symbols:</strong> {profile.symbols.join(', ')} / <strong>Timeframes:</strong> {profile.timeframes.join(', ')}
                         </p>
                         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-400">
+                          <span>Mode: {profile.execution_mode === 'broker_demo' ? 'Demo broker' : profile.execution_mode === 'live' ? 'Live broker' : 'Paper'}</span>
                           <span>Risk: {profile.risk_percent}%</span>
                           <span>Min Conf: {profile.minimum_confidence}%</span>
                           <span>Min R:R: {profile.minimum_risk_reward}:1</span>
-                          <span>Approval: {profile.approval_required ? 'Required' : 'Automatic'}</span>
+                          <span>Alert: {profile.approval_required ? 'Review before entry' : 'Auto-approve signal'}</span>
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
@@ -748,7 +756,7 @@ export default function SignalsPage() {
                   />
                   <div>
                     <span className="font-semibold block">Require manual approval</span>
-                    <span className="text-xs text-slate-400 block mt-0.5">If unchecked, matching setups will automatically place orders on your broker.</span>
+                    <span className="text-xs text-slate-400 block mt-0.5">Keep enabled to receive scanner alerts and decide whether to enter.</span>
                   </div>
                 </label>
               </div>
