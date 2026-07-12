@@ -26,9 +26,22 @@ async def run_backtest(
             detail="Strategy not found"
         )
 
+    account = db.query(models.BrokerAccount).filter(
+        models.BrokerAccount.id == backtest_data.broker_account_id,
+        models.BrokerAccount.user_id == current_user["user_id"],
+        models.BrokerAccount.is_active == True,
+    ).first()
+
+    if not account or not account.metaapi_account_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Active broker account connected to MetaApi not found"
+        )
+
     try:
         outcome = run_engine(
             strategy=strategy,
+            metaapi_account_id=account.metaapi_account_id,
             symbol=backtest_data.symbol,
             timeframe=backtest_data.timeframe,
             start_epoch=int(backtest_data.start_date.timestamp()),

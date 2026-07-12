@@ -48,6 +48,10 @@ config_mod = _make_module(
         ENABLE_LIVE_TRADING=False,
         METAAPI_TOKEN="test-token",
         METAAPI_REGION="london",
+        REDIS_URL="redis://localhost:6379/0",
+        QUOTE_STALE_AFTER_SECONDS=10.0,
+        APP_URL="http://localhost:3000",
+        SMTP_HOST="",
     ),
     DATABASE_URL="sqlite:///:memory:",
 )
@@ -128,7 +132,7 @@ from app.models import (  # noqa: E402  (stubs must be registered first)
     ExecutionAudit, Notification, BrokerAccount, User,
 )
 from app.services.execution import utc_now, evaluate_signal_for_execution  # noqa: E402
-from app.routes.signals import _quote_observed_price  # noqa: E402
+from app.services.metaapi_gateway import extract_observed_price as _quote_observed_price  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

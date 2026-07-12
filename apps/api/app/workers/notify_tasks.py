@@ -157,6 +157,22 @@ def check_entry_zones(self):
                     signal.id, mid, signal.entry_min or 0, signal.entry_max or 0,
                 )
 
+                # Auto-execution check if approved and waiting for entry
+                if signal.approved_action == "wait_for_entry" and signal.execution_mode:
+                    from app.services.execution import execute_signal_trade
+                    try:
+                        logger.info("Auto-executing approved signal %d entering zone", signal.id)
+                        execute_signal_trade(
+                            db,
+                            user_id=signal.user_id,
+                            signal_id=signal.id,
+                            broker_account_id=signal.broker_account_id,
+                            execution_mode=signal.execution_mode,
+                            is_jump_in=False,
+                        )
+                    except Exception as e:
+                        logger.error("Auto-execution of signal %d failed: %s", signal.id, e)
+
         db.commit()
 
     except Exception as exc:

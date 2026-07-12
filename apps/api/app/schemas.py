@@ -141,6 +141,7 @@ class NotificationResponse(BaseModel):
 
 # AI Analysis Schemas
 class AIAnalysisRequest(BaseModel):
+    broker_account_id: int
     symbol: str
     timeframe: str
     image_url: Optional[str] = None
@@ -233,6 +234,17 @@ class SignalEvaluationRequest(BaseModel):
     observed_price: float = Field(gt=0)
 
 
+class SignalApproveRequest(BaseModel):
+    broker_account_id: int
+    execution_mode: str
+
+
+class SignalExecuteRequest(BaseModel):
+    broker_account_id: int
+    execution_mode: str
+    preview_price: Optional[float] = None
+
+
 class SignalEvaluationResponse(BaseModel):
     eligible: bool
     reasons: List[str]
@@ -275,6 +287,7 @@ class StrategyResponse(BaseModel):
 # Backtesting Schemas
 class BacktestRequest(BaseModel):
     strategy_id: int
+    broker_account_id: int
     symbol: str
     timeframe: str
     start_date: datetime

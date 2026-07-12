@@ -1,10 +1,19 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Bot, ImagePlus, MessageCircleQuestion, Send, ShieldAlert, Sparkles, TriangleAlert, X } from 'lucide-react'
+import { Bot, ImagePlus, MessageCircleQuestion, Send, ShieldAlert, Sparkles, TriangleAlert, X, Landmark } from 'lucide-react'
 
 import { apiRequest, errorMessage, formatDate } from '../../components/api'
 import { PageHeader } from '../../components/page-header'
+
+type BrokerAccount = {
+  id: number
+  broker: string
+  account_id: string
+  account_type: string
+  is_active: boolean
+  connection_state?: string | null
+}
 
 type Analysis = {
   id: number
@@ -34,8 +43,7 @@ const symbolGroups: { label: string; symbols: string[] }[] = [
   { label: 'Forex crosses', symbols: ['EURGBP', 'EURJPY', 'GBPJPY', 'AUDJPY', 'CADJPY', 'CHFJPY', 'EURAUD', 'EURCHF', 'GBPAUD', 'GBPCAD', 'AUDNZD', 'NZDJPY'] },
   { label: 'Metals & energy', symbols: ['XAUUSD', 'XAGUSD', 'XPTUSD', 'USOIL', 'UKOIL', 'NATGAS'] },
   { label: 'Indices', symbols: ['US30', 'US100', 'US500', 'GER40', 'UK100', 'FRA40', 'JPN225', 'AUS200', 'HK50'] },
-  { label: 'Crypto', symbols: ['BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD', 'BNBUSD', 'DOGEUSD'] },
-  { label: 'Synthetics (Deriv)', symbols: ['V10', 'V25', 'V50', 'V75', 'V100', 'BOOM1000', 'CRASH1000', 'STEP'] },
+  { label: 'Crypto', symbols: ['BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD', 'BNBUSD', 'DOGEUSD'] }
 ]
 
 const CUSTOM_SYMBOL = '__custom__'
@@ -53,6 +61,10 @@ function biasTone(bias: string) {
 }
 
 export default function AIAnalysisPage() {
+  const [accounts, setAccounts] = useState<BrokerAccount[]>([])
+  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null)
+  const [accountsLoading, setAccountsLoading] = useState(true)
+
   const [symbol, setSymbol] = useState('EURUSD')
   const [customSymbol, setCustomSymbol] = useState('')
   const [timeframe, setTimeframe] = useState('H1')
@@ -67,6 +79,25 @@ export default function AIAnalysisPage() {
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // 1. Fetch broker accounts
+  useEffect(() => {
+    setAccountsLoading(true)
+    apiRequest<BrokerAccount[]>('/broker-accounts')
+      .then((r) => {
+        const active = r.filter(a => a.is_active && a.connection_state === 'deployed')
+        setAccounts(active)
+        if (active.length > 0) {
+          const saved = localStorage.getItem('arotrade:selected_account_id')
+          const found = active.find(a => String(a.id) === saved)
+          const initial = found ? found.id : active[0].id
+          setSelectedAccountId(initial)
+          localStorage.setItem('arotrade:selected_account_id', String(initial))
+        }
+      })
+      .catch((err) => setError(errorMessage(err)))
+      .finally(() => setAccountsLoading(false))
+  }, [])
 
   const askQuestion = async () => {
     if (!result || !chatInput.trim() || chatLoading) return
@@ -107,6 +138,10 @@ export default function AIAnalysisPage() {
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
     setError('')
+    if (!selectedAccountId) {
+      setError('Please select an active broker account')
+      return
+    }
     const effectiveSymbol = symbol === CUSTOM_SYMBOL ? customSymbol.trim() : symbol
     if (!effectiveSymbol) {
       setError('Enter a symbol to analyze')
@@ -119,6 +154,7 @@ export default function AIAnalysisPage() {
       if (file) {
         const body = new FormData()
         body.append('file', file)
+        body.append('broker_account_id', String(selectedAccountId))
         body.append('symbol', effectiveSymbol)
         body.append('timeframe', timeframe)
         if (prompt) body.append('prompt', prompt)
@@ -126,7 +162,12 @@ export default function AIAnalysisPage() {
       } else {
         analysis = await apiRequest<Analysis>('/ai/analyze', {
           method: 'POST',
-          body: JSON.stringify({ symbol: effectiveSymbol, timeframe, prompt: prompt || null }),
+          body: JSON.stringify({
+            broker_account_id: selectedAccountId,
+            symbol: effectiveSymbol,
+            timeframe,
+            prompt: prompt || null
+          }),
         })
       }
       setResult(analysis)
@@ -139,6 +180,38 @@ export default function AIAnalysisPage() {
     }
   }
 
+  const handleAccountChange = (val: string) => {
+    const id = Number(val)
+    setSelectedAccountId(id)
+    localStorage.setItem('arotrade:selected_account_id', String(id))
+  }
+
+  const selectedAccount = accounts.find(a => a.id === selectedAccountId)
+
+  if (accountsLoading) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <div className="text-sm font-medium text-slate-500">Loading MT5 Accounts...</div>
+      </div>
+    )
+  }
+
+  if (accounts.length === 0) {
+    return (
+      <>
+        <PageHeader eyebrow="Research" title="AI analysis" description="Analyze live market prices." />
+        <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-6 text-center">
+          <Landmark size={32} className="mx-auto text-blue-500" />
+          <h2 className="mt-3 text-sm font-semibold text-slate-900">No active broker accounts connected</h2>
+          <p className="mt-1 text-xs text-slate-500">You must connect and deploy an active MT5 broker account to run AI market analysis.</p>
+          <div className="mt-4">
+            <a href="/dashboard/broker-accounts" className="btn-primary py-1.5 px-4 text-xs font-semibold">Connect Account</a>
+          </div>
+        </div>
+      </>
+    )
+  }
+
   return (
     <>
       <PageHeader
@@ -146,10 +219,40 @@ export default function AIAnalysisPage() {
         title="AI analysis"
         description="Pick a symbol and the AI analyzes live market prices directly — no screenshot needed. Ask follow-up questions until everything is clear. Analyses never open trades by themselves."
       />
+
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-lg border border-slate-200 bg-white px-5 py-3">
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-bold text-slate-500 uppercase">Selected Account:</span>
+          <select
+            aria-label="Broker Account"
+            className="input-base w-64 text-sm"
+            value={selectedAccountId || ''}
+            onChange={(e) => handleAccountChange(e.target.value)}
+          >
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.broker} ({a.account_type.toUpperCase()} · {a.account_id})
+              </option>
+            ))}
+          </select>
+        </div>
+        {selectedAccount && (
+          <div className="flex items-center gap-2">
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+              selectedAccount.account_type === 'live' ? 'bg-[#f0fdf4] text-[#166534] border border-[#bbf7d0]' : 'bg-[#eff6ff] text-[#1e40af] border border-[#bfdbfe]'
+            }`}>
+              {selectedAccount.account_type === 'live' ? 'LIVE MT5' : 'DEMO MT5'}
+            </span>
+          </div>
+        )}
+      </div>
+
       <section className="grid gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
         <form onSubmit={handleSubmit} className="card h-fit space-y-4">
           <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-[#2563eb]"><Bot size={20} aria-hidden="true" /></span>
+            <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-[#2563eb]">
+              <Bot size={20} aria-hidden="true" />
+            </span>
             <div>
               <h2 className="text-sm font-semibold text-slate-900">New analysis</h2>
               <p className="text-xs text-slate-500">Powered by Gemini</p>
@@ -179,7 +282,15 @@ export default function AIAnalysisPage() {
           {symbol === CUSTOM_SYMBOL && (
             <div>
               <label htmlFor="custom-symbol" className="label">Custom symbol</label>
-              <input id="custom-symbol" className="input-base uppercase" value={customSymbol} onChange={(e) => setCustomSymbol(e.target.value.toUpperCase())} required maxLength={20} placeholder="e.g. USDZAR" />
+              <input
+                id="custom-symbol"
+                className="input-base uppercase"
+                value={customSymbol}
+                onChange={(e) => setCustomSymbol(e.target.value.toUpperCase())}
+                required
+                maxLength={20}
+                placeholder="e.g. USDZAR"
+              />
             </div>
           )}
 
@@ -187,9 +298,13 @@ export default function AIAnalysisPage() {
             <span className="label">Chart screenshot (optional)</span>
             {previewUrl ? (
               <div className="relative overflow-hidden rounded-md border border-slate-200">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={previewUrl} alt="Chart to analyze" className="max-h-56 w-full object-contain bg-slate-50" />
-                <button type="button" className="icon-button absolute right-2 top-2 h-8 w-8" onClick={() => { setFile(null); if (fileInputRef.current) fileInputRef.current.value = '' }} title="Remove image">
+                <button
+                  type="button"
+                  className="icon-button absolute right-2 top-2 h-8 w-8"
+                  onClick={() => { setFile(null); if (fileInputRef.current) fileInputRef.current.value = '' }}
+                  title="Remove image"
+                >
                   <X size={15} aria-hidden="true" />
                 </button>
               </div>
@@ -203,13 +318,28 @@ export default function AIAnalysisPage() {
                 Click to add a PNG / JPEG chart screenshot
               </button>
             )}
-            <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-            <p className="mt-1.5 text-xs text-slate-500">The AI reads live prices for all listed symbols automatically. Add a screenshot only when you want it to see your own chart drawings or indicators.</p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              className="hidden"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            />
+            <p className="mt-1.5 text-xs text-slate-500">
+              The AI reads live prices for the selected account automatically. Add a screenshot only when you want it to see your own chart drawings.
+            </p>
           </div>
 
           <div>
             <label htmlFor="prompt" className="label">Question / context (optional)</label>
-            <textarea id="prompt" className="input-base min-h-20 resize-y" value={prompt} onChange={(e) => setPrompt(e.target.value)} maxLength={500} placeholder="e.g. Is this a valid break of structure on the H4?" />
+            <textarea
+              id="prompt"
+              className="input-base min-h-20 resize-y"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              maxLength={500}
+              placeholder="e.g. Is this a valid break of structure on the H4?"
+            />
           </div>
 
           {error && <div className="rounded-md border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700">{error}</div>}
@@ -225,11 +355,17 @@ export default function AIAnalysisPage() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="text-lg font-bold text-slate-950">{result.symbol} · {result.timeframe}</h2>
-                  <p className="text-sm text-slate-500">Bias: <span className={`font-semibold capitalize ${biasTone(result.bias)}`}>{result.bias}</span></p>
+                  <p className="text-sm text-slate-500">
+                    Bias: <span className={`font-semibold capitalize ${biasTone(result.bias)}`}>{result.bias}</span>
+                  </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className={`rounded-full px-3 py-1 text-sm font-bold uppercase ${signalTone(result.signal)}`}>{result.signal}</span>
-                  <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-semibold text-[#1d4ed8]">Confidence {result.confidence}%</span>
+                  <span className={`rounded-full px-3 py-1 text-sm font-bold uppercase ${signalTone(result.signal)}`}>
+                    {result.signal}
+                  </span>
+                  <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-semibold text-[#1d4ed8]">
+                    Confidence {result.confidence}%
+                  </span>
                 </div>
               </div>
 
@@ -245,11 +381,15 @@ export default function AIAnalysisPage() {
                   </div>
                   <div className="rounded-md bg-slate-50 px-3 py-3">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Targets</p>
-                    <p className="mt-1 text-sm font-bold tabular-nums text-[#15803d]">{[result.take_profit_1, result.take_profit_2, result.take_profit_3].filter(Boolean).join(' / ') || '—'}</p>
+                    <p className="mt-1 text-sm font-bold tabular-nums text-[#15803d]">
+                      {[result.take_profit_1, result.take_profit_2, result.take_profit_3].filter(Boolean).join(' / ') || '—'}
+                    </p>
                   </div>
                   <div className="rounded-md bg-slate-50 px-3 py-3">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Reward : risk</p>
-                    <p className="mt-1 text-sm font-bold tabular-nums text-slate-950">{result.risk_reward ? result.risk_reward.toFixed(2) : '—'}</p>
+                    <p className="mt-1 text-sm font-bold tabular-nums text-slate-950">
+                      {result.risk_reward ? result.risk_reward.toFixed(2) : '—'}
+                    </p>
                   </div>
                 </div>
               )}
@@ -285,11 +425,16 @@ export default function AIAnalysisPage() {
                 <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                   <MessageCircleQuestion size={16} className="text-[#2563eb]" aria-hidden="true" /> Ask about this analysis
                 </h3>
-                <p className="mt-1 text-xs text-slate-500">Don&apos;t understand a term or a level? Ask in plain language — the AI mentor explains this exact analysis.</p>
+                <p className="mt-1 text-xs text-slate-500">Ask in plain language — the AI mentor explains this exact analysis.</p>
                 {chat.length > 0 && (
                   <div className="mt-3 max-h-72 space-y-2 overflow-y-auto">
                     {chat.map((message, index) => (
-                      <div key={index} className={`rounded-md px-3 py-2.5 text-sm leading-6 ${message.role === 'user' ? 'ml-8 bg-blue-50 text-slate-800' : 'mr-8 bg-slate-50 text-slate-700'}`}>
+                      <div
+                        key={index}
+                        className={`rounded-md px-3 py-2.5 text-sm leading-6 ${
+                          message.role === 'user' ? 'ml-8 bg-blue-50 text-slate-800' : 'mr-8 bg-slate-50 text-slate-700'
+                        }`}
+                      >
                         {message.content}
                       </div>
                     ))}
@@ -302,11 +447,18 @@ export default function AIAnalysisPage() {
                     onChange={(e) => setChatInput(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void askQuestion() } }}
                     className="input-base"
-                    placeholder="e.g. What does invalidation mean here? Why is the stop at that level?"
+                    placeholder="e.g. What does invalidation mean here?"
                     maxLength={500}
                     aria-label="Ask a question about this analysis"
                   />
-                  <button type="button" onClick={() => void askQuestion()} disabled={chatLoading || !chatInput.trim()} className="btn-primary shrink-0 px-3" title="Send question" aria-label="Send question">
+                  <button
+                    type="button"
+                    onClick={() => void askQuestion()}
+                    disabled={chatLoading || !chatInput.trim()}
+                    className="btn-primary shrink-0 px-3"
+                    title="Send question"
+                    aria-label="Send question"
+                  >
                     <Send size={16} aria-hidden="true" />
                   </button>
                 </div>
@@ -314,10 +466,14 @@ export default function AIAnalysisPage() {
             </div>
           ) : (
             <div className="card flex min-h-48 flex-col items-center justify-center gap-3 text-center">
-              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-[#2563eb]"><Bot size={24} aria-hidden="true" /></span>
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-[#2563eb]">
+                <Bot size={24} aria-hidden="true" />
+              </span>
               <div>
                 <h2 className="text-sm font-semibold text-slate-900">No analysis yet</h2>
-                <p className="mt-1 max-w-sm text-sm leading-6 text-slate-500">Pick a symbol and run the analysis — the AI reads live prices automatically. The result appears here with levels, reasoning and warnings, and you can ask it questions.</p>
+                <p className="mt-1 max-w-sm text-sm leading-6 text-slate-500">
+                  Pick a symbol and run the analysis — the AI reads live MT5 prices automatically.
+                </p>
               </div>
             </div>
           )}
@@ -327,10 +483,19 @@ export default function AIAnalysisPage() {
               <h2 className="text-sm font-semibold text-slate-900">Recent analyses</h2>
               <div className="mt-3 divide-y divide-slate-100">
                 {history.map((item) => (
-                  <button key={item.id} type="button" onClick={() => { setResult(item); setChat([]) }} className="flex w-full cursor-pointer items-center justify-between gap-3 py-2.5 text-left transition-colors hover:bg-slate-50">
-                    <span className="text-sm font-semibold text-slate-900">{item.symbol} <span className="font-normal text-slate-500">· {item.timeframe}</span></span>
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => { setResult(item); setChat([]) }}
+                    className="flex w-full cursor-pointer items-center justify-between gap-3 py-2.5 text-left transition-colors hover:bg-slate-50"
+                  >
+                    <span className="text-sm font-semibold text-slate-900">
+                      {item.symbol} <span className="font-normal text-slate-500">· {item.timeframe}</span>
+                    </span>
                     <span className="flex items-center gap-2">
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-bold uppercase ${signalTone(item.signal)}`}>{item.signal}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-bold uppercase ${signalTone(item.signal)}`}>
+                        {item.signal}
+                      </span>
                       <span className="hidden text-xs text-slate-400 sm:block">{formatDate(item.created_at)}</span>
                     </span>
                   </button>

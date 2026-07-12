@@ -20,7 +20,7 @@ bcrypt==4.1.1
 celery[redis]==5.3.4
 
 # HTTP & API
-httpx==0.25.2
+httpx>=0.23.0,<0.28.0
 requests==2.31.0
 
 # AI Providers
@@ -37,7 +37,7 @@ google-generativeai==0.8.5
 
 # Trading integrations
 # MetaApi for MT4/MT5 connectivity — the ONLY broker integration for MT5 accounts
-# metaapi-cloud-sdk>=27.0.0  # Full async SDK — uncomment for streaming
+metaapi-cloud-sdk>=27.0.0  # Full async SDK — uncomment for streaming
 # Using httpx REST calls (metaapi_gateway.py) for simplicity in Celery context
 websocket-client==1.6.4  # Retained for any direct WS needs
 

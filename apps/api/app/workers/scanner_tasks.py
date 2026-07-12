@@ -76,6 +76,7 @@ def _scan_profile(db, profile):
     )
     from app.services.scanner.pipeline import run_scanner_pipeline
     from app.services.scanner.indicators import spread_in_points
+    from app.services.broker_symbol_sync import needs_symbol_sync, sync_broker_symbols_for_account
 
     user = db.query(models.User).filter(models.User.id == profile.user_id).first()
     if not user or not user.is_active:

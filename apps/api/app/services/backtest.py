@@ -15,7 +15,8 @@ from typing import Optional
 
 import pandas as pd
 
-from app.services import marketdata
+from app.services import metaapi_gateway as metaapi
+from datetime import datetime, UTC
 
 ATR_PERIOD = 14
 STOP_ATR = 1.5
@@ -87,11 +88,24 @@ def _signals(df: pd.DataFrame, template: str) -> pd.Series:
     return cross_up.astype(int) - cross_down.astype(int)
 
 
-def run_backtest(strategy, symbol: str, timeframe: str, start_epoch: int, end_epoch: int, initial_balance: float) -> BacktestOutcome:
+def run_backtest(strategy, metaapi_account_id: str, symbol: str, timeframe: str, start_epoch: int, end_epoch: int, initial_balance: float) -> BacktestOutcome:
     try:
-        candles = marketdata.get_candles(symbol, timeframe, 5000)
-    except marketdata.MarketDataError as exc:
+        tf = metaapi.normalize_timeframe(timeframe)
+        candles = metaapi.get_candles(metaapi_account_id, symbol, tf, count=5000)
+    except metaapi.MetaApiError as exc:
         raise BacktestError(str(exc)) from exc
+
+    # Ensure candle time is UNIX timestamp
+    for c in candles:
+        t = c.get("time")
+        if isinstance(t, str):
+            try:
+                dt = datetime.fromisoformat(t.replace("Z", "+00:00"))
+                c["time"] = int(dt.timestamp())
+            except Exception:
+                pass
+        elif isinstance(t, (int, float)):
+            c["time"] = int(t)
 
     df = pd.DataFrame(candles)
     df = df[(df["time"] >= start_epoch) & (df["time"] <= end_epoch)].reset_index(drop=True)

@@ -10,6 +10,8 @@ from app.database import SessionLocal
 
 logger = logging.getLogger(__name__)
 
+def utc_now() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
 
 @celery_app.task(
     name="app.workers.reconcile_tasks.reconcile_broker_positions",
@@ -20,27 +22,20 @@ logger = logging.getLogger(__name__)
 def reconcile_broker_positions(self):
     """
     Reconcile open local Trade records with actual broker positions.
-
-    For each open live/broker_demo trade:
-      1. Fetch the position from MetaApi by broker_order_id / position_id
-      2. If position is closed at broker: mark local trade as CLOSED with broker PnL
-      3. If position modified (SL/TP changed): update local trade
-      4. If local trade has no matching broker position: flag as RECONCILIATION_ERROR
-
-    This task prevents "zombie" open trades in the local DB.
+    Enforces checks per exact broker_account_id on the trade, handles partial closes,
+    modified SL/TP levels, and prevents marking closed during outages.
     """
     from app import models
-    from app.services.metaapi_gateway import get_positions, MetaApiError
+    from app.services.metaapi_gateway import get_positions, get_history_orders, MetaApiError
 
     db = SessionLocal()
     try:
-        # Only reconcile live and broker_demo trades
+        # Reconcile broker-demo and live open trades
         open_trades = (
             db.query(models.Trade)
             .filter(
                 models.Trade.status == models.TradeStatus.OPEN,
-                models.Trade.execution_status.in_(["filled", "submitted"]),
-                models.Trade.broker_order_id.isnot(None),
+                models.Trade.execution_mode.in_(["broker_demo", "live"]),
             )
             .all()
         )
@@ -48,72 +43,82 @@ def reconcile_broker_positions(self):
         if not open_trades:
             return
 
-        # Group by MetaApi account ID
-        account_ids = set()
-        trade_by_position: dict[str, models.Trade] = {}
-
         for trade in open_trades:
-            # Find the broker account
-            if not trade.user_id:
-                continue
-            # Use the signal's broker_account_id if available
-            if hasattr(trade, "signal") and trade.signal and trade.signal.broker_account_id:
-                account_id = trade.signal.broker_account_id
-                broker_account = db.query(models.BrokerAccount).filter(
-                    models.BrokerAccount.id == account_id
-                ).first()
-            else:
-                broker_account = (
-                    db.query(models.BrokerAccount)
-                    .filter(
-                        models.BrokerAccount.user_id == trade.user_id,
-                        models.BrokerAccount.is_active == True,  # noqa: E712
-                        models.BrokerAccount.connection_state == "deployed",
-                    )
-                    .first()
-                )
-
-            if not broker_account or not broker_account.metaapi_account_id:
+            if not trade.broker_account_id:
                 continue
 
-            meta_account_id = broker_account.metaapi_account_id
-            account_ids.add(meta_account_id)
+            account = db.query(models.BrokerAccount).filter(
+                models.BrokerAccount.id == trade.broker_account_id
+            ).first()
+            if not account or not account.metaapi_account_id or account.connection_state != "deployed":
+                continue
 
-            pid = trade.broker_order_id or ""
-            trade_by_position[f"{meta_account_id}:{pid}"] = trade
-
-        if not account_ids:
-            return
-
-        changed = 0
-        for meta_account_id in account_ids:
             try:
-                positions = get_positions(meta_account_id)
-                open_ids = {str(p.get("id") or p.get("positionId", "")) for p in positions}
+                # 1. Fetch current open positions from MetaApi for the exact account
+                positions = get_positions(account.metaapi_account_id)
+                
+                # Try to locate the position matching broker_position_id
+                matched_pos = None
+                for pos in positions:
+                    if str(pos.get("id") or pos.get("positionId") or "") == str(trade.broker_position_id):
+                        matched_pos = pos
+                        break
 
-                for trade in open_trades:
-                    pid = trade.broker_order_id or ""
-                    key = f"{meta_account_id}:{pid}"
-                    if key not in trade_by_position:
-                        continue
-                    if pid not in open_ids:
-                        # Position is closed at broker
-                        trade.status = models.TradeStatus.CLOSED
-                        trade.execution_status = "reconciled_closed"
-                        trade.exit_time = datetime.now(UTC).replace(tzinfo=None)
+                if matched_pos:
+                    # Position is still open! Check if SL, TP or Volume changed
+                    sl = float(matched_pos.get("stopLoss") or 0.0)
+                    tp = float(matched_pos.get("takeProfit") or 0.0)
+                    vol = float(matched_pos.get("volume") or 0.0)
+                    
+                    updated = False
+                    if sl > 0 and abs(trade.stop_loss - sl) > 1e-6:
+                        trade.stop_loss = sl
+                        updated = True
+                    if tp > 0 and abs((trade.take_profit or 0.0) - tp) > 1e-6:
+                        trade.take_profit = tp
+                        updated = True
+                    if vol > 0 and abs(trade.actual_volume - vol) > 1e-6:
+                        trade.actual_volume = vol
+                        updated = True
+                    
+                    if updated:
+                        trade.reconciliation_status = "modified"
                         db.add(trade)
-                        changed += 1
-                        logger.info(
-                            "Reconciled: trade %d closed at broker (position %s)",
-                            trade.id, pid,
-                        )
+                        db.commit()
+                        logger.info("Reconciled: trade %d modified in MT5", trade.id)
+                else:
+                    # Position not found in open positions — search history/deals to verify closure
+                    history_deals = get_history_orders(account.metaapi_account_id)
+                    
+                    closing_deal = None
+                    for deal in history_deals:
+                        if str(deal.get("positionId") or "") == str(trade.broker_position_id) and deal.get("entryType") == "DEAL_ENTRY_OUT":
+                            closing_deal = deal
+                            break
+                    
+                    if closing_deal:
+                        trade.status = models.TradeStatus.CLOSED
+                        trade.exit_price = float(closing_deal.get("price") or trade.exit_price or 0.0)
+                        trade.exit_time = utc_now()
+                        trade.broker_profit = float(closing_deal.get("profit") or 0.0)
+                        trade.profit_loss = trade.broker_profit
+                        trade.commission = float(closing_deal.get("commission") or 0.0)
+                        trade.swap = float(closing_deal.get("swap") or 0.0)
+                        trade.reconciliation_status = "reconciled"
+                        trade.execution_status = "reconciled_closed"
+                        
+                        db.add(trade)
+                        db.commit()
+                        logger.info("Reconciled: trade %d closed in MT5", trade.id)
+                    else:
+                        # Position is closed but no historical deal found yet. Mark degraded but don't close.
+                        trade.reconciliation_status = "uncertain_closed"
+                        db.add(trade)
+                        db.commit()
 
             except MetaApiError as exc:
-                logger.warning("Reconciliation error for account %s: %s", meta_account_id, exc)
-
-        if changed:
-            db.commit()
-            logger.info("Reconciliation complete: %d trades updated", changed)
+                # Connection outage! Do NOT mark position as closed!
+                logger.warning("Reconciliation MetaApi error for account %s: %s. Outage detected, skipping.", account.metaapi_account_id, exc)
 
     except Exception as exc:
         logger.error("Reconciliation task failed: %s", exc, exc_info=True)

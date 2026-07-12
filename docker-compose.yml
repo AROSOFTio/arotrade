@@ -151,6 +151,22 @@ services:
     healthcheck:
       disable: true
 
+  # Market Data Streaming Daemon
+  streamer:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: arotrade-streamer
+    environment:
+      <<: *api-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    command: python -m app.streamer
+
   # Next.js Frontend
   web:
     build:

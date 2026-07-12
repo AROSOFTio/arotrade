@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.database import get_db
-from app.services import metaapi
+from app.services import metaapi_gateway as metaapi
 from app.services.broker_symbol_sync import sync_broker_symbols_for_account
 from app.services.notify import create_notification
 

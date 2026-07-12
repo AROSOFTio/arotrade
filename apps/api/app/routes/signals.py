@@ -5,10 +5,12 @@ from sqlalchemy.orm import Session
 from app import models, schemas
 from app.database import get_db
 from app.config import settings
-from app.services import metaapi
-from app.services.execution import PaperBroker, evaluate_signal_for_execution, utc_now
+from app.services import metaapi_gateway as metaapi
+from app.services.execution import evaluate_signal_for_execution, utc_now
 from app.services.notify import notify_signal_event
 from app.services import trading_control
+from app.services.position_sizing import calculate_position_size, spec_from_metaapi_specification
+from app.services.risk_engine import run_risk_checks
 
 router = APIRouter()
 
@@ -111,10 +113,11 @@ async def get_signal(
 @router.put("/{signal_id}/approve")
 async def approve_signal(
     signal_id: int,
+    request: schemas.SignalApproveRequest,
     current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Approve a signal."""
+    """Approve a signal and configure its tracking/execution parameters."""
     signal = _get_user_signal(signal_id, current_user["user_id"], db)
 
     if signal.status != models.SignalStatus.PENDING:
@@ -123,8 +126,21 @@ async def approve_signal(
             detail="Only pending signals can be approved"
         )
 
+    # Verify broker account
+    account = db.query(models.BrokerAccount).filter(
+        models.BrokerAccount.id == request.broker_account_id,
+        models.BrokerAccount.user_id == current_user["user_id"],
+        models.BrokerAccount.is_active == True,
+    ).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Broker account not found")
+
     signal.status = models.SignalStatus.APPROVED
     signal.approved_at = utc_now()
+    signal.approved_action = "wait_for_entry"
+    signal.broker_account_id = request.broker_account_id
+    signal.execution_mode = request.execution_mode
+    signal.broker_symbol = signal.broker_symbol or signal.symbol
 
     user = db.query(models.User).filter(models.User.id == current_user["user_id"]).first()
     if user:
@@ -132,7 +148,6 @@ async def approve_signal(
 
     db.commit()
     db.refresh(signal)
-
     return signal
 
 
@@ -152,37 +167,119 @@ async def reject_signal(
         )
 
     signal.status = models.SignalStatus.REJECTED
+    signal.approved_action = "reject"
     db.commit()
     db.refresh(signal)
-
     return signal
 
 
-@router.post("/{signal_id}/evaluate", response_model=schemas.SignalEvaluationResponse)
-async def evaluate_signal(
+@router.post("/{signal_id}/preview")
+async def preview_execution(
     signal_id: int,
-    request: schemas.SignalEvaluationRequest,
+    request: schemas.SignalExecuteRequest,
     current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Explain whether an approved signal is eligible for paper execution."""
-    signal = _get_user_signal(signal_id, current_user["user_id"], db)
+    """Calculate sizing and check risk gates for a preview of execution."""
     user = db.query(models.User).filter(models.User.id == current_user["user_id"]).first()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    signal = _get_user_signal(signal_id, current_user["user_id"], db)
+    account = db.query(models.BrokerAccount).filter(
+        models.BrokerAccount.id == request.broker_account_id,
+        models.BrokerAccount.user_id == current_user["user_id"],
+        models.BrokerAccount.is_active == True,
+    ).first()
+    if not user or not account:
+        raise HTTPException(status_code=404, detail="User or account not found")
 
+    try:
+        quote = metaapi.get_symbol_price(account.metaapi_account_id, signal.broker_symbol or signal.symbol, require_fresh=True)
+        spec_dict = metaapi.get_symbol_specification(account.metaapi_account_id, signal.broker_symbol or signal.symbol)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch quote/specs: {exc}")
+
+    spec = spec_from_metaapi_specification(spec_dict)
+    if not spec:
+        raise HTTPException(status_code=400, detail="Incomplete symbol specifications")
+
+    observed_price = metaapi.extract_observed_price(quote, signal.signal_type)
+
+    # Sizing
+    risk_percent = signal.scanner_profile.risk_percent if signal.scanner_profile else user.default_risk_percent
+    sizing = calculate_position_size(
+        equity=account.balance or 10000,
+        risk_percent=risk_percent,
+        entry_price=observed_price,
+        stop_loss=signal.stop_loss,
+        spec=spec,
+        free_margin=account.balance or 10000,
+        direction=signal.signal_type,
+        platform_max_volume=settings.MAX_LIVE_ORDER_VOLUME
+    )
+
+    # Risk Engine
     open_trade_count = db.query(models.Trade).filter(
         models.Trade.user_id == user.id,
         models.Trade.status == models.TradeStatus.OPEN,
     ).count()
-    result = evaluate_signal_for_execution(signal, user, open_trade_count, request.observed_price)
+    from app.services.execution import _get_daily_loss
+    daily_loss = _get_daily_loss(db, user.id)
+
+    quote_time_str = quote.get("time") or quote.get("brokerTime")
+    risk_result = run_risk_checks(
+        db=db,
+        signal=signal,
+        user=user,
+        account=account,
+        observed_price=observed_price,
+        volume=sizing.final_volume,
+        execution_mode=request.execution_mode,
+        quote=quote,
+        quote_time_str=quote_time_str,
+        open_trade_count=open_trade_count,
+        daily_realized_pnl=daily_loss,
+        equity=account.balance or 10000,
+        free_margin=account.balance or 10000,
+        is_jump_in=True,
+    )
+
     return {
-        "eligible": result.eligible,
-        "reasons": result.reasons,
-        "calculated_risk_reward": result.calculated_risk_reward,
+        "eligible": risk_result.approved and not sizing.blocked,
+        "reasons": risk_result.reasons + ([sizing.block_reason] if sizing.blocked else []),
+        "calculated_volume": sizing.final_volume,
+        "observed_price": observed_price,
+        "bid": quote.get("bid") or quote.get("brokerBid"),
+        "ask": quote.get("ask") or quote.get("brokerAsk"),
+        "spread": quote.get("spread") or 0.0,
+        "risk_amount": sizing.risk_amount,
+        "loss_per_lot": sizing.loss_per_lot,
     }
 
 
+@router.post("/{signal_id}/execute", response_model=schemas.TradeResponse)
+async def execute_signal(
+    signal_id: int,
+    request: schemas.SignalExecuteRequest,
+    current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Execute a trade for an approved signal."""
+    from app.services.execution import execute_signal_trade, ExecutionError
+    try:
+        trade = execute_signal_trade(
+            db,
+            user_id=current_user["user_id"],
+            signal_id=signal_id,
+            broker_account_id=request.broker_account_id,
+            execution_mode=request.execution_mode,
+            is_jump_in=True,
+            preview_price=request.preview_price,
+        )
+        return trade
+    except ExecutionError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+# Legacy wrappers for backward compatibility with external/test callers
 @router.post("/{signal_id}/execute-demo", response_model=schemas.TradeResponse)
 async def execute_signal_demo(
     signal_id: int,
@@ -190,88 +287,29 @@ async def execute_signal_demo(
     current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Create a clearly labelled paper trade after deterministic signal checks pass."""
-    control = trading_control.get_platform_control(db)
-    paper_reason = trading_control.paper_block_reason(control)
-    if paper_reason:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=paper_reason)
-
-    signal = _get_user_signal(signal_id, current_user["user_id"], db)
-    user = db.query(models.User).filter(models.User.id == current_user["user_id"]).first()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-
-    existing_trade = db.query(models.Trade).filter(
-        models.Trade.signal_id == signal.id,
-        models.Trade.status == models.TradeStatus.OPEN,
+    """Paper execution fallback wrapper."""
+    account = db.query(models.BrokerAccount).filter(
+        models.BrokerAccount.user_id == current_user["user_id"],
+        models.BrokerAccount.is_active == True,
     ).first()
-    if existing_trade:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Signal already has an open trade")
+    if not account:
+        raise HTTPException(status_code=404, detail="No active broker account found")
 
-    open_trade_count = db.query(models.Trade).filter(
-        models.Trade.user_id == user.id,
-        models.Trade.status == models.TradeStatus.OPEN,
-    ).count()
-    result = evaluate_signal_for_execution(signal, user, open_trade_count, request.observed_price)
-    if not result.eligible:
-        _add_execution_audit(
+    from app.services.execution import execute_signal_trade, ExecutionError
+    # map demo client request to paper execution if no demo MT5 connected, or broker_demo if it is
+    mode = "broker_demo" if account.account_type == models.TradingMode.DEMO else "paper"
+    try:
+        return execute_signal_trade(
             db,
-            user_id=user.id,
-            signal_id=signal.id,
-            outcome="blocked",
-            reason="; ".join(result.reasons),
-            details={
-                "observed_price": request.observed_price,
-                "calculated_risk_reward": result.calculated_risk_reward,
-            },
+            user_id=current_user["user_id"],
+            signal_id=signal_id,
+            broker_account_id=account.id,
+            execution_mode=mode,
+            is_jump_in=True,
+            preview_price=request.observed_price,
         )
-        db.commit()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=result.reasons)
-
-    fill = PaperBroker().submit(request.observed_price)
-    now = utc_now()
-    trade = models.Trade(
-        user_id=user.id,
-        signal_id=signal.id,
-        symbol=signal.symbol,
-        trade_type=signal.signal_type,
-        entry_price=fill.fill_price,
-        entry_time=now,
-        stop_loss=signal.stop_loss,
-        take_profit=signal.take_profit_1,
-        volume=request.volume,
-        notes=request.notes or signal.notes,
-        status=models.TradeStatus.OPEN,
-        mode=models.TradingMode.DEMO,
-        broker=fill.broker,
-        broker_order_id=fill.broker_order_id,
-        client_order_id=fill.client_order_id,
-        execution_status="filled",
-        submitted_at=now,
-        filled_at=now,
-    )
-    db.add(trade)
-    db.flush()
-
-    signal.status = models.SignalStatus.EXECUTED_DEMO
-    signal.executed_at = now
-    _add_execution_audit(
-        db,
-        user_id=user.id,
-        signal_id=signal.id,
-        trade_id=trade.id,
-        outcome="filled",
-        reason="Paper execution filled after signal gate passed",
-        details={
-            "observed_price": request.observed_price,
-            "volume": request.volume,
-            "calculated_risk_reward": result.calculated_risk_reward,
-            "simulated": True,
-        },
-    )
-    db.commit()
-    db.refresh(trade)
-    return trade
+    except ExecutionError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
 @router.post("/{signal_id}/execute-live", response_model=schemas.TradeResponse)
@@ -281,192 +319,16 @@ async def execute_signal_live(
     current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Send an approved signal to the user's connected MT5 account as a real order.
-
-    Gates, in order: user opted into live trading and accepted the disclaimer,
-    signal is approved and unexpired with a stop loss, volume within platform
-    cap, no open trade for this signal, open-trade count below the user limit,
-    and the broker account is a deployed MetaApi connection owned by the user.
-    """
-    signal = _get_user_signal(signal_id, current_user["user_id"], db)
-    user = db.query(models.User).filter(models.User.id == current_user["user_id"]).first()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-
-    control = trading_control.get_platform_control(db)
-    platform_reason = trading_control.live_entry_block_reason(control)
-    if platform_reason:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=platform_reason)
-
-    if not user.enable_live_trading or not user.accepted_live_disclaimer:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Enable live trading in Settings (and accept the risk disclaimer) first"
-        )
-
-    signal_status = getattr(signal.status, "value", signal.status)
-    if signal_status != "approved":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only approved signals can be executed live")
-    if signal.valid_until is not None and signal.valid_until <= utc_now():
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Signal has expired")
-    if not signal.stop_loss or signal.stop_loss <= 0:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No stop loss - live execution refused")
-    if request.volume > settings.MAX_LIVE_ORDER_VOLUME:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Volume exceeds the platform cap of {settings.MAX_LIVE_ORDER_VOLUME} lots"
-        )
-
-    existing_trade = db.query(models.Trade).filter(
-        models.Trade.signal_id == signal.id,
-        models.Trade.status == models.TradeStatus.OPEN,
-    ).first()
-    if existing_trade:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Signal already has an open trade")
-
-    open_trade_count = db.query(models.Trade).filter(
-        models.Trade.user_id == user.id,
-        models.Trade.status == models.TradeStatus.OPEN,
-    ).count()
-    if open_trade_count >= user.max_open_trades:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Maximum open-trade limit reached")
-
-    account = db.query(models.BrokerAccount).filter(
-        models.BrokerAccount.id == request.broker_account_id,
-        models.BrokerAccount.user_id == user.id,
-        models.BrokerAccount.is_active == True,  # noqa: E712
-    ).first()
-    if not account or not account.metaapi_account_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connected broker account not found")
-    if account.account_type != models.TradingMode.LIVE:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Select a verified LIVE broker account. Demo broker accounts cannot receive real-money orders."
-        )
-    if account.connection_state != "deployed":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Broker account is not deployed - deploy it on the Broker accounts page first"
-        )
-
+    """Live execution fallback wrapper."""
+    from app.services.execution import execute_signal_trade, ExecutionError
     try:
-        quote = metaapi.get_symbol_price(account.metaapi_account_id, signal.symbol)
-    except metaapi.MetaApiError as exc:
-        db.add(models.ExecutionAudit(
-            user_id=user.id,
-            signal_id=signal.id,
-            broker=account.broker,
-            mode=models.TradingMode.LIVE.value,
-            outcome="rejected",
-            reason=str(exc),
-            details={"broker_account_id": account.id, "validation": "broker_quote"},
-        ))
-        db.commit()
-        raise HTTPException(status_code=exc.status_code if exc.status_code >= 400 else 502, detail=f"Broker quote is missing or stale: {exc}")
-
-    observed_price = _quote_observed_price(quote, signal.signal_type)
-    if observed_price <= 0:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Broker quote is missing or stale")
-
-    result = evaluate_signal_for_execution(signal, user, open_trade_count, observed_price)
-    if not result.eligible:
-        db.add(models.ExecutionAudit(
-            user_id=user.id,
-            signal_id=signal.id,
-            broker=account.broker,
-            mode=models.TradingMode.LIVE.value,
-            outcome="blocked",
-            reason="; ".join(result.reasons),
-            details={
-                "volume": request.volume,
-                "broker_account_id": account.id,
-                "observed_price": observed_price,
-                "broker_quote": quote,
-                "calculated_risk_reward": result.calculated_risk_reward,
-            },
-        ))
-        db.commit()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=result.reasons)
-
-    client_order_id = f"arotrade-live-{uuid4()}"
-    try:
-        order_result = metaapi.place_market_order(
-            metaapi_account_id=account.metaapi_account_id,
-            symbol=signal.symbol,
-            direction=signal.signal_type,
-            volume=request.volume,
-            stop_loss=signal.stop_loss,
-            take_profit=signal.take_profit_1,
-            client_id=client_order_id,
-            comment=f"AroTrade #{signal.id}",
+        return execute_signal_trade(
+            db,
+            user_id=current_user["user_id"],
+            signal_id=signal_id,
+            broker_account_id=request.broker_account_id,
+            execution_mode="live",
+            is_jump_in=True,
         )
-    except metaapi.MetaApiError as exc:
-        db.add(models.ExecutionAudit(
-            user_id=user.id,
-            signal_id=signal.id,
-            broker=account.broker,
-            mode=models.TradingMode.LIVE.value,
-            outcome="rejected",
-            reason=str(exc),
-            details={"volume": request.volume, "broker_account_id": account.id},
-        ))
-        db.commit()
-        raise HTTPException(status_code=exc.status_code if exc.status_code >= 400 else 502, detail=str(exc))
-
-    now = utc_now()
-    fill_price = float(order_result.get("openPrice") or 0) or signal.entry_min
-    trade = models.Trade(
-        user_id=user.id,
-        signal_id=signal.id,
-        symbol=signal.symbol,
-        trade_type=signal.signal_type,
-        entry_price=fill_price,
-        entry_time=now,
-        stop_loss=signal.stop_loss,
-        take_profit=signal.take_profit_1,
-        volume=request.volume,
-        notes=request.notes or signal.notes,
-        status=models.TradeStatus.OPEN,
-        mode=models.TradingMode.LIVE,
-        broker=account.broker,
-        broker_order_id=str(order_result.get("orderId") or order_result.get("positionId") or ""),
-        client_order_id=client_order_id,
-        execution_status=(order_result.get("stringCode") or "submitted").lower(),
-        submitted_at=now,
-        filled_at=now if order_result.get("openPrice") else None,
-    )
-    db.add(trade)
-    db.flush()
-
-    signal.status = models.SignalStatus.EXECUTED_LIVE
-    signal.executed_at = now
-    db.add(models.ExecutionAudit(
-        user_id=user.id,
-        signal_id=signal.id,
-        trade_id=trade.id,
-        broker=account.broker,
-        mode=models.TradingMode.LIVE.value,
-        outcome="submitted",
-        reason="Live order submitted via MetaApi",
-        details={
-            "volume": request.volume,
-            "broker_account_id": account.id,
-            "metaapi_response": order_result,
-        },
-    ))
-
-    notify_signal_event(db, user, signal, "executed_live")
-    db.commit()
-    db.refresh(trade)
-    return trade
-
-
-def _quote_observed_price(quote: dict, direction: str) -> float:
-    bid = quote.get("bid") or quote.get("brokerBid")
-    ask = quote.get("ask") or quote.get("brokerAsk")
-    price = ask if direction == "buy" else bid
-    price = price or quote.get("price") or quote.get("last") or quote.get("close")
-    try:
-        return float(price)
-    except (TypeError, ValueError):
-        return 0.0
+    except ExecutionError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))

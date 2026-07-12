@@ -283,6 +283,7 @@ class Signal(Base):
 
     # Approval action
     approved_action = Column(String(30), nullable=True)  # "wait_for_entry" or "jump_in_now"
+    execution_mode = Column(String(20), nullable=True)   # "paper", "broker_demo", "live"
 
     # Timestamps
     created_at = Column(DateTime, server_default=func.now())
@@ -407,10 +408,31 @@ class Trade(Base):
 
     notes = Column(Text, nullable=True)
 
+    # MT5 connection & real execution details
+    broker_account_id = Column(Integer, ForeignKey("broker_accounts.id"), nullable=True)
+    execution_mode = Column(String(20), nullable=True)
+    provider = Column(String(50), nullable=True)
+    broker_symbol = Column(String(30), nullable=True)
+    execution_intent_id = Column(Integer, ForeignKey("execution_intents.id"), nullable=True)
+    broker_position_id = Column(String(255), nullable=True)
+    broker_deal_id = Column(String(255), nullable=True)
+    requested_price = Column(Float, nullable=True)
+    actual_fill_price = Column(Float, nullable=True)
+    requested_volume = Column(Float, nullable=True)
+    actual_volume = Column(Float, nullable=True)
+    commission = Column(Float, nullable=True)
+    swap = Column(Float, nullable=True)
+    broker_profit = Column(Float, nullable=True)
+    reconciliation_status = Column(String(50), nullable=True)
+    opened_time = Column(DateTime, nullable=True)
+    closed_time = Column(DateTime, nullable=True)
+
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     user = relationship("User", back_populates="trades")
+    broker_account = relationship("BrokerAccount", foreign_keys=[broker_account_id])
+    execution_intent = relationship("ExecutionIntent", foreign_keys=[execution_intent_id])
 
 
 class ExecutionAudit(Base):

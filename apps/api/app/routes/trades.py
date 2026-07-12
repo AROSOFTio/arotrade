@@ -66,11 +66,11 @@ async def get_trade(
 @router.post("/{trade_id}/close")
 async def close_trade(
     trade_id: int,
-    exit_price: float,
+    exit_price: float = None,
     current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Close an open trade."""
+    """Close an open trade (either paper or real broker trade)."""
     trade = db.query(models.Trade).filter(
         models.Trade.id == trade_id,
         models.Trade.user_id == current_user["user_id"]
@@ -88,7 +88,35 @@ async def close_trade(
             detail="Trade is not open"
         )
 
-    # Calculate P&L
+    # 1. Real Broker Execution Mode (broker_demo / live)
+    if trade.execution_mode in ("broker_demo", "live"):
+        account = db.query(models.BrokerAccount).filter(
+            models.BrokerAccount.id == trade.broker_account_id
+        ).first()
+        if not account or not account.metaapi_account_id:
+            raise HTTPException(status_code=400, detail="Broker account mapping missing")
+
+        from app.services import metaapi_gateway as metaapi
+        try:
+            res = metaapi.close_position(account.metaapi_account_id, trade.broker_position_id)
+            # Retrieve closing details
+            fill_exit = float(res.get("price") or res.get("closePrice") or 0.0)
+            trade.exit_price = fill_exit if fill_exit > 0 else trade.entry_price
+            trade.exit_time = datetime.utcnow()
+            trade.status = models.TradeStatus.CLOSED
+            trade.reconciliation_status = "reconciled"
+            trade.execution_status = "closed"
+            
+            db.commit()
+            db.refresh(trade)
+            return trade
+        except Exception as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Failed to close MT5 position: {exc}")
+
+    # 2. Simulated Mode (paper)
+    if exit_price is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="exit_price is required for paper trades")
+
     if trade.trade_type == "buy":
         profit_loss = (exit_price - trade.entry_price) * trade.volume
     else:
@@ -96,7 +124,6 @@ async def close_trade(
 
     profit_loss_percent = (profit_loss / (trade.entry_price * trade.volume)) * 100 if trade.entry_price else 0
 
-    # Update trade
     trade.exit_price = exit_price
     trade.exit_time = datetime.utcnow()
     trade.profit_loss = profit_loss

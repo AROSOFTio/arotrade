@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app import models, schemas
 from app.database import get_db
 from app.config import settings
-from app.services import marketdata
+from app.services import metaapi_gateway as metaapi
 from app.services.gemini import (
     GeminiError,
     GeminiNotConfigured,
@@ -16,15 +16,16 @@ from app.services.gemini import (
 router = APIRouter()
 
 SIGNAL_OF_THE_DAY_MARKER = "[signal-of-the-day]"
-SOTD_CANDIDATES = ["EURUSD", "GBPUSD", "XAUUSD", "USDJPY", "BTCUSD", "V75"]
+SOTD_CANDIDATES = ["EURUSD", "GBPUSD", "XAUUSD", "USDJPY", "BTCUSD"]
 
 
-def _live_context(symbol: str, timeframe: str) -> str | None:
-    """Best-effort live candle context; None when the symbol has no feed."""
+def _live_context(metaapi_account_id: str, symbol: str, timeframe: str) -> str | None:
+    """Best-effort live candle context from the connected MT5 account; None on error."""
     try:
-        candles = marketdata.get_candles(symbol, timeframe, 200)
-        return marketdata.candles_to_prompt_context(candles)
-    except marketdata.MarketDataError:
+        tf = metaapi.normalize_timeframe(timeframe)
+        candles = metaapi.get_candles(metaapi_account_id, symbol, tf, 200)
+        return metaapi.candles_to_prompt_context(candles)
+    except Exception:
         return None
 
 ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp"}
@@ -81,11 +82,22 @@ async def analyze_chart(
     db: Session = Depends(get_db)
 ):
     """Analyze a market using Gemini AI, anchored to live candles when the symbol has a feed."""
+    account = db.query(models.BrokerAccount).filter(
+        models.BrokerAccount.id == request.broker_account_id,
+        models.BrokerAccount.user_id == current_user["user_id"],
+        models.BrokerAccount.is_active == True,
+    ).first()
+    if not account or not account.metaapi_account_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Active broker account connected to MetaApi not found"
+        )
+
     result = _run_or_raise(
         symbol=request.symbol,
         timeframe=request.timeframe,
         prompt=request.prompt,
-        price_context=_live_context(request.symbol, request.timeframe),
+        price_context=_live_context(account.metaapi_account_id, request.symbol, request.timeframe),
     )
     return _persist_analysis(db, current_user["user_id"], request.symbol, request.timeframe, request.prompt, result)
 
@@ -93,6 +105,7 @@ async def analyze_chart(
 @router.post("/analyze-image", response_model=schemas.AIAnalysisResponse)
 async def analyze_image_upload(
     file: UploadFile = File(...),
+    broker_account_id: int = Form(...),
     symbol: str = Form(...),
     timeframe: str = Form(...),
     prompt: str = Form(default=""),
@@ -118,13 +131,24 @@ async def analyze_image_upload(
             detail="Uploaded file is empty"
         )
 
+    account = db.query(models.BrokerAccount).filter(
+        models.BrokerAccount.id == broker_account_id,
+        models.BrokerAccount.user_id == current_user["user_id"],
+        models.BrokerAccount.is_active == True,
+    ).first()
+    if not account or not account.metaapi_account_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Active broker account connected to MetaApi not found"
+        )
+
     result = _run_or_raise(
         symbol=symbol,
         timeframe=timeframe,
         prompt=prompt or None,
         image_bytes=image_bytes,
         image_mime=file.content_type,
-        price_context=_live_context(symbol, timeframe),
+        price_context=_live_context(account.metaapi_account_id, symbol, timeframe),
     )
     return _persist_analysis(db, current_user["user_id"], symbol, timeframe, prompt or None, result)
 
@@ -159,10 +183,21 @@ async def signal_of_the_day(
     if existing and not refresh:
         return existing
 
+    account = db.query(models.BrokerAccount).filter(
+        models.BrokerAccount.user_id == current_user["user_id"],
+        models.BrokerAccount.is_active == True,
+        models.BrokerAccount.connection_state == "deployed",
+    ).first()
+    if not account or not account.metaapi_account_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No deployed and active broker account found to scan for Signal of the Day"
+        )
+
     # Build a multi-market context and let the model pick one setup
     sections = []
     for candidate in SOTD_CANDIDATES:
-        context = _live_context(candidate, "H4")
+        context = _live_context(account.metaapi_account_id, candidate, "H4")
         if context:
             # Keep each market compact so the combined prompt stays small
             lines = context.splitlines()
