@@ -255,7 +255,7 @@ export default function AIAnalysisPage() {
             </span>
             <div>
               <h2 className="text-sm font-semibold text-slate-900">New analysis</h2>
-              <p className="text-xs text-slate-500">Powered by Gemini</p>
+              <p className="text-xs text-slate-500">Powered by Deep AI Engine</p>
             </div>
           </div>
 

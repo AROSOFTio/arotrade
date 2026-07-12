@@ -21,7 +21,7 @@ const features = [
   {
     icon: BrainCircuit,
     title: 'AI market analysis',
-    description: 'Gemini-powered analysis reads market structure, momentum and sentiment, then explains its reasoning in plain language.',
+    description: 'Deep AI analysis reads market structure, momentum and sentiment, then explains its reasoning in plain language.',
   },
   {
     icon: Radio,
