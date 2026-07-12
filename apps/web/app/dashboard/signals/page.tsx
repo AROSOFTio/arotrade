@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Check, Play, Plus, Search, X, Zap, Sliders, Loader2, Sparkles, RefreshCw, Trash2, Landmark, ShieldAlert, AlertTriangle } from 'lucide-react'
+import { Plus, Search, Sliders, Loader2, Sparkles, RefreshCw, Trash2, AlertTriangle } from 'lucide-react'
 
 import { apiRequest, errorMessage, formatDate, formatNumber } from '../../components/api'
 import { EmptyState } from '../../components/empty-state'
