@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, UTC
 from typing import Optional
+from urllib.parse import quote
 
 import httpx
 
@@ -75,6 +76,11 @@ def _headers() -> dict:
 def _client_base() -> str:
     region = settings.METAAPI_REGION or "london"
     return f"https://mt-client-api-v1.{region}.agiliumtrade.ai"
+
+
+def _market_data_base() -> str:
+    region = settings.METAAPI_REGION or "london"
+    return f"https://mt-market-data-client-api-v1.{region}.agiliumtrade.ai"
 
 
 def _request(
@@ -273,7 +279,11 @@ def get_candles(
     """
     response = _request(
         "GET",
-        f"{_client_base()}/users/current/accounts/{metaapi_account_id}/historical-candles/{symbol}/{timeframe}",
+        (
+            f"{_market_data_base()}/users/current/accounts/{metaapi_account_id}"
+            f"/historical-market-data/symbols/{quote(symbol, safe='')}"
+            f"/timeframes/{quote(timeframe, safe='')}/candles?limit={count}"
+        ),
         timeout=60.0,
     )
     raw = response.json()
