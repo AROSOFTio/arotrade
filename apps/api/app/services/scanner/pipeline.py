@@ -360,7 +360,7 @@ def run_scanner_pipeline(
                 f"Confidence {confidence}% | RR {candidate.risk_reward:.1f}"
             ),
             category="signal",
-            link=f"/dashboard/signals/{signal.id}",
+            link=f"/dashboard/signals?signal={signal.id}",
         )
 
         db.commit()

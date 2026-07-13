@@ -55,7 +55,7 @@ def expire_stale_signals(self):
                     f"has expired without being triggered. Entry zone was no longer valid."
                 ),
                 category="signal",
-                link=f"/dashboard/signals/{signal.id}",
+                link=f"/dashboard/signals?signal={signal.id}",
             )
 
         if expiring:
@@ -149,7 +149,7 @@ def check_entry_zones(self):
                         f"{signal.entry_min:.5f}–{signal.entry_max:.5f}."
                     ),
                     category="signal",
-                    link=f"/dashboard/signals/{signal.id}",
+                    link=f"/dashboard/signals?signal={signal.id}",
                 )
 
                 logger.info(
