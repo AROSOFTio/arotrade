@@ -31,7 +31,11 @@ x-api-env: &api-env
   GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.5-flash}
   METAAPI_TOKEN: ${METAAPI_TOKEN:-}
   METAAPI_REGION: ${METAAPI_REGION:-london}
-  ENABLE_LIVE_TRADING: ${ENABLE_LIVE_TRADING:-false}
+  ENABLE_LIVE_TRADING: ${ENABLE_LIVE_TRADING:-true}
+  LIVE_TRADING_ALLOWED: ${LIVE_TRADING_ALLOWED:-true}
+  NEW_LIVE_ENTRIES_ALLOWED: ${NEW_LIVE_ENTRIES_ALLOWED:-true}
+  FREE_MARGIN_RESERVE_PERCENT: ${FREE_MARGIN_RESERVE_PERCENT:-10.0}
+  PAPER_TRADING_ENABLED: ${PAPER_TRADING_ENABLED:-true}
   ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
   # Scanner
   SCANNER_ENABLED: ${SCANNER_ENABLED:-true}
@@ -128,7 +132,7 @@ services:
       api:
         condition: service_healthy
     restart: unless-stopped
-    command: celery -A app.workers.celery_app worker -l info -Q scanner,reconcile,notify,celery
+    command: celery -A app.workers:celery_app worker -l info -Q scanner,reconcile,notify,celery
     healthcheck:
       disable: true
 
@@ -147,7 +151,7 @@ services:
       worker:
         condition: service_started
     restart: unless-stopped
-    command: celery -A app.workers.celery_app beat -l info --scheduler celery.beat:PersistentScheduler
+    command: celery -A app.workers:celery_app beat -l info --scheduler celery.beat:PersistentScheduler
     healthcheck:
       disable: true
 
@@ -175,12 +179,12 @@ services:
       context: ./apps/web
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
         NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-AroTrade AI}
     container_name: arotrade-web
     environment:
       NODE_ENV: ${APP_ENV:-production}
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
       NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-AroTrade AI}
       NEXT_PUBLIC_BRAND_COLOR: ${NEXT_PUBLIC_BRAND_COLOR:-#155DFC}
     expose:
@@ -188,6 +192,19 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    restart: unless-stopped
+
+  # Caddy Proxy
+  caddy:
+    image: caddy:2-alpine
+    container_name: arotrade-proxy
+    ports:
+      - "80:80"
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile
+    depends_on:
+      - api
+      - web
     restart: unless-stopped
 
 volumes:

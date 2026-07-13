@@ -43,13 +43,14 @@ class RiskCheckResult:
 def run_risk_checks(
     *,
     db: Session,
-    signal: models.Signal,
     user: models.User,
     account: models.BrokerAccount,
     observed_price: float,
     volume: float,
     execution_mode: str,
     quote: dict,
+    signal: Optional[models.Signal] = None,
+    stop_loss: Optional[float] = None,
     quote_time_str: Optional[str] = None,
     open_trade_count: int,
     daily_realized_pnl: float = 0.0,
@@ -64,16 +65,16 @@ def run_risk_checks(
     Run all risk checks before submitting a broker order.
 
     Enforced checks:
-      - Platform kill switch
+      - Platform kill switch (Emergency stop, Close-only, live trading overrides)
       - User trading preference
       - Correct account mode
       - Account connection state
       - Quote freshness
-      - Signal expiry
-      - Signal approval
+      - Signal expiry (if signal-based)
+      - Signal approval (if signal-based)
       - Stop-loss required
-      - Minimum confidence
-      - Minimum reward/risk
+      - Minimum confidence (if signal-based)
+      - Minimum reward/risk (if signal-based)
       - Maximum spread
       - Risk per trade
       - Maximum daily realized loss
@@ -85,15 +86,23 @@ def run_risk_checks(
       - Maximum account exposure
       - Free-margin requirement
       - Live trading global flag
-      - Jump-in entry distance
+      - Jump-in entry distance (if signal-based)
     """
     r = RiskCheckResult()
     now = now or datetime.now(UTC).replace(tzinfo=None)
 
     # -----------------------------------------------------------------------
-    # 1. Platform kill switch
+    # 1. Platform controls & kill switches (Enforced globally)
     # -----------------------------------------------------------------------
     control = trading_control.get_platform_control(db)
+
+    # Global emergency stop
+    if control.get("emergency_stop", False):
+        r.block("Emergency stop is active. Platform trading is entirely paused.")
+
+    # Global close only mode
+    if control.get("close_only_mode", False):
+        r.block("Close-only mode is active. New entries are blocked.")
 
     if execution_mode == "live":
         kill_reason = trading_control.live_entry_block_reason(control)
@@ -155,31 +164,33 @@ def run_risk_checks(
                         "Cannot execute on stale price."
                     )
         except Exception:
-            pass  # Cannot parse time Ã¢â‚¬â€ let it through but log
+            pass
 
     if observed_price <= 0:
         r.block("Observed price is zero or negative.")
 
     # -----------------------------------------------------------------------
-    # 4. Signal validity
+    # 4. Signal validity (if signal-based)
     # -----------------------------------------------------------------------
-    signal_status = getattr(signal.status, "value", str(signal.status))
-    if signal_status != "approved":
-        r.block(f"Signal status is '{signal_status}' Ã¢â‚¬â€ only approved signals can be executed.")
+    if signal:
+        signal_status = getattr(signal.status, "value", str(signal.status))
+        if signal_status != "approved":
+            r.block(f"Signal status is '{signal_status}' — only approved signals can be executed.")
 
-    if signal.valid_until and signal.valid_until <= now:
-        r.block("Signal has expired.")
+        if signal.valid_until and signal.valid_until <= now:
+            r.block("Signal has expired.")
 
     # -----------------------------------------------------------------------
     # 5. Stop-loss required
     # -----------------------------------------------------------------------
-    if not signal.stop_loss or signal.stop_loss <= 0:
+    effective_sl = stop_loss if stop_loss is not None else (signal.stop_loss if signal else None)
+    if not effective_sl or effective_sl <= 0:
         r.block("Stop-loss is required for every order.")
 
     # -----------------------------------------------------------------------
     # 6. Entry price validation
     # -----------------------------------------------------------------------
-    if signal.entry_min and signal.entry_max:
+    if signal and signal.entry_min and signal.entry_max:
         if is_jump_in:
             mid_entry = (signal.entry_min + signal.entry_max) / 2
             distance_pct = abs(observed_price - mid_entry) / mid_entry if mid_entry > 0 else 0
@@ -187,19 +198,19 @@ def run_risk_checks(
                 r.block(
                     f"Current price {observed_price:.5f} is {distance_pct * 100:.2f}% from entry zone mid "
                     f"{mid_entry:.5f} (limit {JUMP_IN_TOLERANCE_PCT * 100:.1f}%). "
-                    "Price has moved too far from the setup Ã¢â‚¬â€ jump-in blocked."
+                    "Price has moved too far from the setup — jump-in blocked."
                 )
         else:
             if not (signal.entry_min <= observed_price <= signal.entry_max):
                 r.block(
                     f"Observed price {observed_price:.5f} is outside entry zone "
-                    f"{signal.entry_min:.5f}Ã¢â‚¬â€œ{signal.entry_max:.5f}."
+                    f"{signal.entry_min:.5f}–{signal.entry_max:.5f}."
                 )
 
     # -----------------------------------------------------------------------
-    # 7. Minimum confidence
+    # 7. Minimum confidence (if signal-based)
     # -----------------------------------------------------------------------
-    if signal.confidence < settings.MIN_SIGNAL_CONFIDENCE:
+    if signal and signal.confidence < settings.MIN_SIGNAL_CONFIDENCE:
         r.block(
             f"Signal confidence {signal.confidence}% is below minimum {settings.MIN_SIGNAL_CONFIDENCE}%."
         )
@@ -226,11 +237,6 @@ def run_risk_checks(
             )
 
     # -----------------------------------------------------------------------
-    # 10. Maximum drawdown
-    # -----------------------------------------------------------------------
-    # (Would require knowing the starting balance Ã¢â‚¬â€ simplified for now)
-
-    # -----------------------------------------------------------------------
     # 11. Volume limits
     # -----------------------------------------------------------------------
     if volume <= 0:
@@ -241,9 +247,10 @@ def run_risk_checks(
             f"Volume {volume} exceeds platform maximum {settings.MAX_LIVE_ORDER_VOLUME} lots."
         )
 
-    risk_percent = signal.scanner_profile.risk_percent if getattr(signal, "scanner_profile", None) else user.default_risk_percent
+    risk_percent = signal.scanner_profile.risk_percent if (signal and getattr(signal, "scanner_profile", None)) else user.default_risk_percent
     if execution_mode == "live" and risk_percent > 0.25:
         r.block("Live order risk exceeds maximum 0.25% account risk per trade.")
+
     # -----------------------------------------------------------------------
     # 12. Broker-calculated margin
     # -----------------------------------------------------------------------

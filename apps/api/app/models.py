@@ -220,6 +220,11 @@ class AIAnalysis(Base):
     news_warning = Column(Text, nullable=True)
     risk_warning = Column(Text, nullable=True)
 
+    candle_close_time = Column(DateTime, nullable=True)
+    quote_time = Column(DateTime, nullable=True)
+    quote_age_seconds = Column(Float, nullable=True)
+    stale_data_warning = Column(Boolean, default=False)
+
     created_at = Column(DateTime, server_default=func.now())
 
 
@@ -685,7 +690,7 @@ class ExecutionIntent(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    signal_id = Column(Integer, ForeignKey("signals.id"), nullable=False, index=True)
+    signal_id = Column(Integer, ForeignKey("signals.id"), nullable=True, index=True)
     broker_account_id = Column(Integer, ForeignKey("broker_accounts.id"), nullable=True)
 
     execution_mode = Column(String(20), nullable=False)  # paper / broker_demo / live

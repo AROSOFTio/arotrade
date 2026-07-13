@@ -33,6 +33,8 @@ DEFAULT_CONTROL: dict[str, bool] = {
     "broker_demo_trading_allowed": True,
     "paper_trading_allowed": True,
     "live_position_management_allowed": True,
+    "emergency_stop": False,
+    "close_only_mode": False,
 }
 
 

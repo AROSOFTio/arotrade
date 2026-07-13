@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Bot, ImagePlus, MessageCircleQuestion, Send, ShieldAlert, Sparkles, TriangleAlert, X, Landmark } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { Bot, ImagePlus, MessageCircleQuestion, Send, ShieldAlert, Sparkles, TriangleAlert, X, Landmark, ArrowUpDown, Clock } from 'lucide-react'
 
 import { apiRequest, errorMessage, formatDate } from '../../components/api'
 import { PageHeader } from '../../components/page-header'
@@ -34,6 +35,10 @@ type Analysis = {
   news_warning?: string | null
   risk_warning?: string | null
   created_at: string
+  candle_close_time?: string | null
+  quote_time?: string | null
+  quote_age_seconds?: number | null
+  stale_data_warning?: boolean | null
 }
 
 const timeframes = ['M5', 'M15', 'M30', 'H1', 'H4', 'D1', 'W1']
@@ -61,6 +66,7 @@ function biasTone(bias: string) {
 }
 
 export default function AIAnalysisPage() {
+  const router = useRouter()
   const [accounts, setAccounts] = useState<BrokerAccount[]>([])
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null)
   const [accountsLoading, setAccountsLoading] = useState(true)
@@ -369,29 +375,89 @@ export default function AIAnalysisPage() {
                 </div>
               </div>
 
-              {(result.entry_min > 0 || result.stop_loss > 0) && (
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  <div className="rounded-md bg-slate-50 px-3 py-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Entry zone</p>
-                    <p className="mt-1 text-sm font-bold tabular-nums text-slate-950">{result.entry_min} – {result.entry_max}</p>
-                  </div>
-                  <div className="rounded-md bg-slate-50 px-3 py-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Stop loss</p>
-                    <p className="mt-1 text-sm font-bold tabular-nums text-[#b91c1c]">{result.stop_loss}</p>
-                  </div>
-                  <div className="rounded-md bg-slate-50 px-3 py-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Targets</p>
-                    <p className="mt-1 text-sm font-bold tabular-nums text-[#15803d]">
-                      {[result.take_profit_1, result.take_profit_2, result.take_profit_3].filter(Boolean).join(' / ') || '—'}
-                    </p>
-                  </div>
-                  <div className="rounded-md bg-slate-50 px-3 py-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Reward : risk</p>
-                    <p className="mt-1 text-sm font-bold tabular-nums text-slate-950">
-                      {result.risk_reward ? result.risk_reward.toFixed(2) : '—'}
-                    </p>
-                  </div>
+              {/* Timestamps & Stale Warning */}
+              <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <Clock size={13} className="text-slate-400" />
+                  <span className="text-[11px] font-bold uppercase text-slate-500">Data Freshness</span>
                 </div>
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] sm:grid-cols-4">
+                  <div>
+                    <dt className="text-slate-400">Analysis created</dt>
+                    <dd className="font-semibold text-slate-700">{formatDate(result.created_at)}</dd>
+                  </div>
+                  {result.candle_close_time && (
+                    <div>
+                      <dt className="text-slate-400">Candle close</dt>
+                      <dd className="font-semibold text-slate-700">{formatDate(result.candle_close_time)}</dd>
+                    </div>
+                  )}
+                  {result.quote_time && (
+                    <div>
+                      <dt className="text-slate-400">Quote time</dt>
+                      <dd className="font-semibold text-slate-700">{formatDate(result.quote_time)}</dd>
+                    </div>
+                  )}
+                  {result.quote_age_seconds != null && (
+                    <div>
+                      <dt className="text-slate-400">Quote age</dt>
+                      <dd className={`font-semibold ${
+                        result.stale_data_warning ? 'text-red-600' : 'text-slate-700'
+                      }`}>{result.quote_age_seconds.toFixed(0)}s</dd>
+                    </div>
+                  )}
+                </dl>
+                {result.stale_data_warning && (
+                  <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
+                    <TriangleAlert size={13} className="mt-0.5 shrink-0 text-amber-600" />
+                    <p className="text-[11px] font-semibold text-amber-800">Stale price data — quotes were {result.quote_age_seconds?.toFixed(0)}s old when this analysis was created. Levels may not reflect current market conditions.</p>
+                  </div>
+                )}
+              </div>
+
+              {(result.entry_min > 0 || result.stop_loss > 0) && (
+                <>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <div className="rounded-md bg-slate-50 px-3 py-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Entry zone</p>
+                      <p className="mt-1 text-sm font-bold tabular-nums text-slate-950">{result.entry_min} – {result.entry_max}</p>
+                    </div>
+                    <div className="rounded-md bg-slate-50 px-3 py-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Stop loss</p>
+                      <p className="mt-1 text-sm font-bold tabular-nums text-[#b91c1c]">{result.stop_loss}</p>
+                    </div>
+                    <div className="rounded-md bg-slate-50 px-3 py-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Targets</p>
+                      <p className="mt-1 text-sm font-bold tabular-nums text-[#15803d]">
+                        {[result.take_profit_1, result.take_profit_2, result.take_profit_3].filter(Boolean).join(' / ') || '—'}
+                      </p>
+                    </div>
+                    <div className="rounded-md bg-slate-50 px-3 py-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Reward : risk</p>
+                      <p className="mt-1 text-sm font-bold tabular-nums text-slate-950">
+                        {result.risk_reward ? result.risk_reward.toFixed(2) : '—'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Use levels in trade ticket */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const params = new URLSearchParams({
+                        symbol: result.symbol,
+                        direction: result.signal === 'buy' || result.signal === 'sell' ? result.signal : 'buy',
+                        sl: String(result.stop_loss),
+                        ...(result.take_profit_1 ? { tp: String(result.take_profit_1) } : {})
+                      })
+                      router.push(`/dashboard/markets?${params.toString()}`)
+                    }}
+                    className="flex w-full items-center justify-center gap-2 rounded-lg border-2 border-blue-200 bg-blue-50/50 py-2.5 text-xs font-bold text-[#1d4ed8] transition-all hover:bg-blue-100 hover:border-blue-300"
+                  >
+                    <ArrowUpDown size={14} />
+                    Use levels in trade ticket
+                  </button>
+                </>
               )}
 
               <div>

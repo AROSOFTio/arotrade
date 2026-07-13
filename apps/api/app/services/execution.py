@@ -189,14 +189,11 @@ def get_broker_account_metrics(account: models.BrokerAccount, execution_mode: st
     )
 
 
-def resolve_signal_broker_symbol(db: Session, signal: models.Signal, account: models.BrokerAccount) -> str:
-    """Resolve and persist the exact broker symbol for this account."""
-    if signal.broker_symbol:
-        return signal.broker_symbol
-
-    canonical = (signal.canonical_symbol or signal.symbol or "").upper().strip()
+def resolve_broker_symbol(db: Session, canonical_symbol: str, account: models.BrokerAccount) -> str:
+    """Resolve the exact broker symbol for a specific account.  Always re-resolves."""
+    canonical = canonical_symbol.upper().strip()
     if not canonical:
-        raise ExecutionError("Signal does not include a canonical symbol to resolve.")
+        raise ExecutionError("No symbol provided to resolve.")
 
     broker_symbol = db.query(models.BrokerSymbol).filter(
         models.BrokerSymbol.broker_account_id == account.id,
@@ -204,10 +201,9 @@ def resolve_signal_broker_symbol(db: Session, signal: models.Signal, account: mo
         models.BrokerSymbol.trade_allowed == True,  # noqa: E712
     ).first()
     if broker_symbol:
-        signal.broker_symbol = broker_symbol.broker_symbol
-        signal.canonical_symbol = broker_symbol.canonical_symbol
         return broker_symbol.broker_symbol
 
+    # Fallback: check the broker directly for the canonical name
     try:
         metaapi.get_symbol_specification(account.metaapi_account_id, canonical)
     except Exception as exc:
@@ -216,9 +212,16 @@ def resolve_signal_broker_symbol(db: Session, signal: models.Signal, account: mo
             "Refresh broker symbols before executing."
         ) from exc
 
-    signal.broker_symbol = canonical
-    signal.canonical_symbol = canonical
     return canonical
+
+
+def resolve_signal_broker_symbol(db: Session, signal: models.Signal, account: models.BrokerAccount) -> str:
+    """Resolve and persist the exact broker symbol for this signal's account."""
+    canonical = (signal.canonical_symbol or signal.symbol or "").upper().strip()
+    resolved = resolve_broker_symbol(db, canonical, account)
+    signal.broker_symbol = resolved
+    signal.canonical_symbol = canonical
+    return resolved
 
 
 def make_broker_client_id(signal_id: int) -> str:
@@ -230,33 +233,34 @@ def _find_confirmed_position(
     *,
     client_order_id: str,
     comment: str,
-    symbol: str,
-    direction: str,
-    volume: float,
 ) -> tuple[str, str, str] | None:
-    """Locate the real broker position without inventing IDs."""
-    direction = direction.lower()
+    """Locate the real broker position by strict identity (clientId/comment) only.
+
+    Shape-only matching (symbol/direction/volume) is deliberately removed to
+    prevent matching the wrong position when multiple orders for the same
+    instrument are open concurrently.
+    """
     candidates = []
     try:
         candidates.extend(metaapi.get_positions(account.metaapi_account_id))
     except Exception:
-        pass
+        return None
 
     for pos in candidates:
         pos_text = " ".join(str(pos.get(key, "")) for key in ("clientId", "comment", "id", "positionId", "orderId"))
-        pos_symbol = str(pos.get("symbol") or "").upper()
-        pos_type = str(pos.get("type") or pos.get("positionType") or "").lower()
-        pos_volume = float(pos.get("volume") or pos.get("currentVolume") or 0)
-        matches_identity = client_order_id in pos_text or comment in pos_text
-        matches_shape = pos_symbol == symbol.upper() and direction in pos_type and abs(pos_volume - volume) < 1e-8
-        if matches_identity or matches_shape:
-            position_id = str(pos.get("id") or pos.get("positionId") or "")
-            if position_id:
-                return (
-                    str(pos.get("orderId") or ""),
-                    position_id,
-                    str(pos.get("dealId") or ""),
-                )
+        if client_order_id and client_order_id in pos_text:
+            pass  # identity match
+        elif comment and comment in pos_text:
+            pass  # identity match
+        else:
+            continue
+        position_id = str(pos.get("id") or pos.get("positionId") or "")
+        if position_id:
+            return (
+                str(pos.get("orderId") or ""),
+                position_id,
+                str(pos.get("dealId") or ""),
+            )
 
     return None
 
@@ -353,10 +357,13 @@ def execute_signal_trade(
         if not user or not account:
             raise ExecutionError("User or Broker account not found.")
 
-        # Database row lock on the signal
-        signal = db.query(models.Signal).filter(models.Signal.id == signal_id).with_for_update().first()
+        # Database row lock on the signal — filter by user_id to prevent cross-user access
+        signal = db.query(models.Signal).filter(
+            models.Signal.id == signal_id,
+            models.Signal.user_id == user_id,
+        ).with_for_update().first()
         if not signal:
-            raise ExecutionError("Signal not found.")
+            raise ExecutionError("Signal not found or does not belong to this user.")
 
         # Safety Check: Duplicate trades or intents
         existing_trade = db.query(models.Trade).filter(
@@ -585,9 +592,6 @@ def execute_signal_trade(
                     account,
                     client_order_id=client_order_id,
                     comment=comment,
-                    symbol=broker_symbol,
-                    direction=signal.signal_type,
-                    volume=sizing.final_volume,
                 )
                 if confirmed:
                     intent.broker_order_id = confirmed[0] or intent.broker_order_id
@@ -657,9 +661,6 @@ def execute_signal_trade(
                     account,
                     client_order_id=client_order_id,
                     comment=comment,
-                    symbol=broker_symbol,
-                    direction=signal.signal_type,
-                    volume=sizing.final_volume,
                 )
                 if confirmed:
                     intent.status = "FILLED"; intent.execution_state = "FILLED"

@@ -47,6 +47,10 @@ celery_app.autodiscover_tasks([
 scanner_interval = settings.SCANNER_DEFAULT_INTERVAL_SECONDS
 
 celery_app.conf.beat_schedule = {
+    "worker-heartbeat": {
+        "task": "app.workers.reconcile_tasks.worker_heartbeat",
+        "schedule": 15,  # every 15 seconds
+    },
     "scanner-periodic": {
         "task": "app.workers.scanner_tasks.run_all_scanner_profiles",
         "schedule": scanner_interval,

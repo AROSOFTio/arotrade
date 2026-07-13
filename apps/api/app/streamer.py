@@ -58,6 +58,10 @@ class MarketDataListener(SynchronizationListener):
             cache_key = f"mt5:quote:{self.local_account_id}:{symbol.upper()}"
             redis_client.set(cache_key, json.dumps(quote_data), ex=30)
 
+            # Record streamer heartbeat and quote latest timestamp
+            redis_client.set("streamer:heartbeat", datetime.now(UTC).isoformat())
+            redis_client.set("quote:latest:timestamp", datetime.now(UTC).isoformat())
+
             # Publish update on Redis pubsub
             redis_client.publish(f"channel:quotes:{self.local_account_id}", json.dumps(quote_data))
             
@@ -176,6 +180,7 @@ async def stream_for_account(api: MetaApi, local_account: models.BrokerAccount):
                 except Exception as e:
                     logger.error("Failed to subscribe to %s on %s: %s", symbol, metaapi_account_id, e)
 
+            redis_client.set("streamer:heartbeat", datetime.now(UTC).isoformat())
             await asyncio.sleep(60)
 
     except Exception as exc:
@@ -218,6 +223,7 @@ async def main():
             db.close()
 
         # Periodically check account list every 60 seconds
+        redis_client.set("streamer:heartbeat", datetime.now(UTC).isoformat())
         await asyncio.sleep(60)
 
 

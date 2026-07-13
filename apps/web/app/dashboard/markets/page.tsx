@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Activity, CalendarClock, Sparkles, TriangleAlert, Landmark } from 'lucide-react'
+import { Activity, CalendarClock, Sparkles, TriangleAlert, Landmark, ShieldAlert, ArrowUpDown, Eye } from 'lucide-react'
 import { createChart, type IChartApi, type ISeriesApi, type UTCTimestamp } from 'lightweight-charts'
 
 import { apiRequest, errorMessage, formatNumber } from '../../components/api'
@@ -65,6 +65,102 @@ export default function MarketsPage() {
   const chartContainerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
+
+  // Manual Trade Ticket State
+  const [tradeDirection, setTradeDirection] = useState<'buy' | 'sell'>('buy')
+  const [sizingMode, setSizingMode] = useState<'fixed' | 'risk'>('fixed')
+  const [volumeInput, setVolumeInput] = useState('0.1')
+  const [riskPercentInput, setRiskPercentInput] = useState('1.0')
+  const [slInput, setSlInput] = useState('')
+  const [tpInput, setTpInput] = useState('')
+  const [previewData, setPreviewData] = useState<any>(null)
+  const [previewError, setPreviewError] = useState('')
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [executionLoading, setExecutionLoading] = useState(false)
+  const [executionSuccess, setExecutionSuccess] = useState('')
+  const [showConfirmModal, setShowConfirmModal] = useState(false)
+
+  const [quoteAge, setQuoteAge] = useState<number | null>(null)
+  const [staleWarning, setStaleWarning] = useState(false)
+  const [wsPrice, setWsPrice] = useState<{ bid: number; ask: number; spread: number } | null>(null)
+
+  // Real-time WebSocket quote stream
+  useEffect(() => {
+    if (!selectedAccountId || !selectedSymbol) return
+    const token = localStorage.getItem('access_token')
+    if (!token) return
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const host = window.location.host
+    const wsUrl = `${protocol}//${host}/api/market/accounts/${selectedAccountId}/quotes/ws?token=${token}&symbols=${selectedSymbol.broker_symbol}`
+    
+    let ws: WebSocket | null = null
+    let reconnectTimeout: number | null = null
+
+    function connect() {
+      ws = new WebSocket(wsUrl)
+      
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data)
+          if (msg.type === 'quote') {
+            const q = msg.data
+            setWsPrice({
+              bid: q.bid,
+              ask: q.ask,
+              spread: q.spread,
+            })
+            setQuoteAge(q.quote_age_seconds)
+            setStaleWarning(q.stale_data_warning)
+            setPrice({
+              symbol: q.symbol,
+              price: q.bid,
+              change: 0,
+              change_percent: 0,
+            })
+          }
+        } catch (e) {
+          console.error(e)
+        }
+      }
+
+      ws.onclose = () => {
+        reconnectTimeout = window.setTimeout(connect, 3000)
+      }
+    }
+
+    connect()
+
+    return () => {
+      if (ws) {
+        ws.onclose = null
+        ws.close()
+      }
+      if (reconnectTimeout) {
+        window.clearTimeout(reconnectTimeout)
+      }
+    }
+  }, [selectedAccountId, selectedSymbol])
+
+  // Auto-populate inputs from query params (e.g. redirected from AI screen)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const symParam = params.get('symbol')
+    const dirParam = params.get('direction')
+    const slParam = params.get('sl')
+    const tpParam = params.get('tp')
+
+    if (symParam && symbols.length > 0) {
+      const found = symbols.find(
+        s => s.canonical_symbol.toUpperCase() === symParam.toUpperCase() ||
+             s.broker_symbol.toUpperCase() === symParam.toUpperCase()
+      )
+      if (found) setSelectedSymbol(found)
+    }
+    if (dirParam === 'buy' || dirParam === 'sell') setTradeDirection(dirParam)
+    if (slParam) setSlInput(slParam)
+    if (tpParam) setTpInput(tpParam)
+  }, [symbols])
 
   // 1. Fetch broker accounts
   useEffect(() => {
@@ -253,6 +349,79 @@ export default function MarketsPage() {
     localStorage.setItem('arotrade:selected_account_id', String(id))
   }
 
+  const handlePreview = async () => {
+    if (!selectedAccountId || !selectedSymbol || !slInput) {
+      setPreviewError('Select account, symbol, and enter a stop loss.')
+      return
+    }
+    setPreviewLoading(true)
+    setPreviewError('')
+    setPreviewData(null)
+    try {
+      const body: any = {
+        broker_account_id: selectedAccountId,
+        symbol: selectedSymbol.broker_symbol,
+        direction: tradeDirection,
+        stop_loss: parseFloat(slInput),
+      }
+      if (tpInput) {
+        body.take_profit = parseFloat(tpInput)
+      }
+      if (sizingMode === 'fixed') {
+        body.volume = parseFloat(volumeInput)
+      } else {
+        body.risk_percent = parseFloat(riskPercentInput)
+      }
+
+      const res = await apiRequest<any>('/orders/preview', {
+        method: 'POST',
+        body: JSON.stringify(body)
+      })
+      setPreviewData(res)
+    } catch (e) {
+      setPreviewError(errorMessage(e))
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
+  const handleExecute = async () => {
+    if (!selectedAccountId || !selectedSymbol || !slInput) return
+    setExecutionLoading(true)
+    setExecutionSuccess('')
+    setError('')
+    try {
+      const body: any = {
+        broker_account_id: selectedAccountId,
+        symbol: selectedSymbol.broker_symbol,
+        direction: tradeDirection,
+        stop_loss: parseFloat(slInput),
+        idempotency_key: `man_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      }
+      if (tpInput) {
+        body.take_profit = parseFloat(tpInput)
+      }
+      if (sizingMode === 'fixed') {
+        body.volume = parseFloat(volumeInput)
+      } else {
+        body.risk_percent = parseFloat(riskPercentInput)
+      }
+
+      const res = await apiRequest<any>('/orders/execute', {
+        method: 'POST',
+        body: JSON.stringify(body)
+      })
+      setExecutionSuccess(`Order executed successfully! Position ID: ${res.broker_position_id || res.id}`)
+      setPreviewData(null)
+      setShowConfirmModal(false)
+    } catch (e) {
+      setError(errorMessage(e))
+      setShowConfirmModal(false)
+    } finally {
+      setExecutionLoading(false)
+    }
+  }
+
   const selectedAccount = accounts.find(a => a.id === selectedAccountId)
 
   if (accountsLoading) {
@@ -362,6 +531,257 @@ export default function MarketsPage() {
         </div>
 
         <div className="space-y-6">
+          {/* ── Manual Trade Ticket ── */}
+          <div className={`card border-2 ${
+            selectedAccount?.account_type === 'live'
+              ? 'border-amber-400/70 bg-gradient-to-b from-amber-50/40 to-white'
+              : 'border-blue-300/60 bg-gradient-to-b from-blue-50/30 to-white'
+          }`}>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                <ArrowUpDown size={15} className="text-[#2563eb]" aria-hidden="true" />
+                Trade Ticket
+              </h2>
+              <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                selectedAccount?.account_type === 'live'
+                  ? 'bg-red-100 text-red-700 border border-red-200'
+                  : 'bg-blue-100 text-blue-700 border border-blue-200'
+              }`}>
+                {selectedAccount?.account_type === 'live' ? '🔴 LIVE ORDER' : 'DEMO'}
+              </span>
+            </div>
+
+            {selectedAccount?.account_type === 'live' && (
+              <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
+                <ShieldAlert size={14} className="mt-0.5 shrink-0 text-amber-600" />
+                <p className="text-[11px] leading-4 font-semibold text-amber-800">LIVE BROKER — Real financial risk. Verify all levels before executing.</p>
+              </div>
+            )}
+
+            {/* Live Bid / Ask / Spread */}
+            <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-md bg-[#f0fdf4] px-2 py-2">
+                <p className="text-[10px] font-semibold uppercase text-slate-500">Bid</p>
+                <p className="mt-0.5 text-sm font-bold tabular-nums text-[#15803d]">
+                  {wsPrice ? formatNumber(wsPrice.bid, 5) : price ? formatNumber(price.price, 5) : '—'}
+                </p>
+              </div>
+              <div className="rounded-md bg-[#fef2f2] px-2 py-2">
+                <p className="text-[10px] font-semibold uppercase text-slate-500">Ask</p>
+                <p className="mt-0.5 text-sm font-bold tabular-nums text-[#b91c1c]">
+                  {wsPrice ? formatNumber(wsPrice.ask, 5) : '—'}
+                </p>
+              </div>
+              <div className="rounded-md bg-slate-50 px-2 py-2">
+                <p className="text-[10px] font-semibold uppercase text-slate-500">Spread</p>
+                <p className="mt-0.5 text-sm font-bold tabular-nums text-slate-700">
+                  {wsPrice ? wsPrice.spread.toFixed(1) : '—'}
+                </p>
+              </div>
+            </div>
+            {quoteAge !== null && (
+              <p className={`mt-1.5 text-[11px] font-medium ${
+                staleWarning ? 'text-red-600' : 'text-slate-400'
+              }`}>
+                {staleWarning ? `⚠ Stale quote (${quoteAge.toFixed(0)}s old) — execution may be rejected` : `Quote age: ${quoteAge.toFixed(0)}s`}
+              </p>
+            )}
+
+            {/* Direction Toggle */}
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setTradeDirection('buy')}
+                className={`rounded-lg py-2 text-xs font-bold uppercase tracking-wide transition-all ${
+                  tradeDirection === 'buy'
+                    ? 'bg-[#15803d] text-white shadow-md shadow-green-200'
+                    : 'bg-slate-100 text-slate-500 hover:bg-green-50 hover:text-[#15803d]'
+                }`}
+              >
+                Buy
+              </button>
+              <button
+                type="button"
+                onClick={() => setTradeDirection('sell')}
+                className={`rounded-lg py-2 text-xs font-bold uppercase tracking-wide transition-all ${
+                  tradeDirection === 'sell'
+                    ? 'bg-[#b91c1c] text-white shadow-md shadow-red-200'
+                    : 'bg-slate-100 text-slate-500 hover:bg-red-50 hover:text-[#b91c1c]'
+                }`}
+              >
+                Sell
+              </button>
+            </div>
+
+            {/* Sizing Mode */}
+            <div className="mt-3">
+              <div className="flex rounded-md border border-slate-200 p-0.5 text-center">
+                <button
+                  type="button"
+                  onClick={() => setSizingMode('fixed')}
+                  className={`flex-1 rounded px-2 py-1 text-[11px] font-semibold transition-colors ${
+                    sizingMode === 'fixed' ? 'bg-blue-50 text-[#1d4ed8]' : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  Fixed Volume
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSizingMode('risk')}
+                  className={`flex-1 rounded px-2 py-1 text-[11px] font-semibold transition-colors ${
+                    sizingMode === 'risk' ? 'bg-blue-50 text-[#1d4ed8]' : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  Risk % Sizing
+                </button>
+              </div>
+              <div className="mt-2">
+                {sizingMode === 'fixed' ? (
+                  <label className="block">
+                    <span className="text-[11px] font-semibold text-slate-600">Volume (lots)</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      className="input-base mt-1 w-full text-sm"
+                      value={volumeInput}
+                      onChange={(e) => setVolumeInput(e.target.value)}
+                    />
+                  </label>
+                ) : (
+                  <label className="block">
+                    <span className="text-[11px] font-semibold text-slate-600">Risk %</span>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.1"
+                      max="10"
+                      className="input-base mt-1 w-full text-sm"
+                      value={riskPercentInput}
+                      onChange={(e) => setRiskPercentInput(e.target.value)}
+                    />
+                  </label>
+                )}
+              </div>
+            </div>
+
+            {/* SL / TP */}
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <label className="block">
+                <span className="text-[11px] font-semibold text-red-600">Stop Loss *</span>
+                <input
+                  type="number"
+                  step="0.00001"
+                  className="input-base mt-1 w-full text-sm border-red-200 focus:border-red-400"
+                  placeholder="Required"
+                  value={slInput}
+                  onChange={(e) => setSlInput(e.target.value)}
+                />
+              </label>
+              <label className="block">
+                <span className="text-[11px] font-semibold text-[#15803d]">Take Profit</span>
+                <input
+                  type="number"
+                  step="0.00001"
+                  className="input-base mt-1 w-full text-sm"
+                  placeholder="Optional"
+                  value={tpInput}
+                  onChange={(e) => setTpInput(e.target.value)}
+                />
+              </label>
+            </div>
+
+            {/* Preview Button */}
+            <button
+              type="button"
+              disabled={previewLoading || !slInput}
+              onClick={() => void handlePreview()}
+              className="btn-secondary mt-3 w-full gap-2 text-xs"
+            >
+              <Eye size={14} />
+              {previewLoading ? 'Calculating…' : 'Preview Trade'}
+            </button>
+
+            {previewError && (
+              <p className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-700">{previewError}</p>
+            )}
+
+            {/* Preview Results */}
+            {previewData && (
+              <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50/50 p-3">
+                <p className="text-[11px] font-bold uppercase text-blue-700 mb-2">Order Preview</p>
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
+                  <dt className="text-slate-500">Direction</dt>
+                  <dd className="font-semibold text-slate-900 text-right">{previewData.direction?.toUpperCase()}</dd>
+                  <dt className="text-slate-500">Volume</dt>
+                  <dd className="font-semibold text-slate-900 tabular-nums text-right">{previewData.calculated_volume ?? previewData.volume}</dd>
+                  <dt className="text-slate-500">Stop Loss</dt>
+                  <dd className="font-semibold text-red-700 tabular-nums text-right">{previewData.stop_loss}</dd>
+                  {previewData.take_profit && <><dt className="text-slate-500">Take Profit</dt><dd className="font-semibold text-[#15803d] tabular-nums text-right">{previewData.take_profit}</dd></>}
+                  {previewData.risk_amount != null && <><dt className="text-slate-500">Risk Amount</dt><dd className="font-semibold text-slate-900 tabular-nums text-right">${previewData.risk_amount?.toFixed(2)}</dd></>}
+                  {previewData.required_margin != null && <><dt className="text-slate-500">Margin Required</dt><dd className="font-semibold text-slate-900 tabular-nums text-right">${previewData.required_margin?.toFixed(2)}</dd></>}
+                  {previewData.free_margin_after != null && <><dt className="text-slate-500">Free Margin After</dt><dd className="font-semibold text-slate-900 tabular-nums text-right">${previewData.free_margin_after?.toFixed(2)}</dd></>}
+                </dl>
+                {previewData.warnings && previewData.warnings.length > 0 && (
+                  <div className="mt-2 rounded border border-amber-200 bg-amber-50 px-2 py-1.5">
+                    {previewData.warnings.map((w: string, i: number) => (
+                      <p key={i} className="text-[11px] text-amber-700">⚠ {w}</p>
+                    ))}
+                  </div>
+                )}
+
+                {/* Execute Button */}
+                {!showConfirmModal ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmModal(true)}
+                    className={`mt-3 w-full rounded-lg py-2.5 text-xs font-bold uppercase tracking-wide text-white transition-all ${
+                      tradeDirection === 'buy'
+                        ? 'bg-[#15803d] hover:bg-[#166534] shadow-md shadow-green-200'
+                        : 'bg-[#b91c1c] hover:bg-[#991b1b] shadow-md shadow-red-200'
+                    }`}
+                  >
+                    {tradeDirection === 'buy' ? '🟢 Execute BUY Order' : '🔴 Execute SELL Order'}
+                  </button>
+                ) : (
+                  <div className="mt-3 rounded-lg border-2 border-amber-300 bg-amber-50 p-3">
+                    <p className="text-xs font-bold text-amber-800">
+                      ⚠ Confirm {selectedAccount?.account_type === 'live' ? 'LIVE' : 'DEMO'} {tradeDirection.toUpperCase()} order?
+                    </p>
+                    <p className="mt-1 text-[11px] text-amber-700">
+                      {previewData.calculated_volume ?? previewData.volume} lots {selectedSymbol?.broker_symbol} · SL {previewData.stop_loss}
+                    </p>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmModal(false)}
+                        className="btn-secondary py-1.5 text-xs"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={executionLoading}
+                        onClick={() => void handleExecute()}
+                        className={`rounded-lg py-1.5 text-xs font-bold text-white ${
+                          tradeDirection === 'buy' ? 'bg-[#15803d]' : 'bg-[#b91c1c]'
+                        }`}
+                      >
+                        {executionLoading ? 'Sending…' : 'Confirm'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Execution Success */}
+            {executionSuccess && (
+              <div className="mt-3 rounded-md border border-green-200 bg-green-50 px-3 py-2">
+                <p className="text-[11px] font-semibold text-green-800">✓ {executionSuccess}</p>
+              </div>
+            )}
+          </div>
           <div className="card">
             <div className="flex items-center justify-between gap-3">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900">

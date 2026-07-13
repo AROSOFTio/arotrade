@@ -124,3 +124,14 @@ def reconcile_broker_positions(self):
         logger.error("Reconciliation task failed: %s", exc, exc_info=True)
     finally:
         db.close()
+
+
+@celery_app.task(name="app.workers.reconcile_tasks.worker_heartbeat", ignore_result=True)
+def worker_heartbeat():
+    """Fired by Celery Beat to record worker and beat heartbeats in Redis."""
+    import redis
+    from app.config import settings
+    r = redis.Redis.from_url(settings.REDIS_URL)
+    now_str = datetime.utcnow().isoformat()
+    r.set("beat:heartbeat", now_str)
+    r.set("worker:heartbeat", now_str)

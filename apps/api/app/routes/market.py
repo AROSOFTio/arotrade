@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, UTC
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 
 from app import models
@@ -312,3 +312,104 @@ async def analyze_news_impact(
     }
     news.set_cached_impact(symbol, result)
     return result
+
+
+@router.websocket("/accounts/{account_id}/quotes/ws")
+async def ws_quotes(
+    websocket: WebSocket,
+    account_id: int,
+    token: str,
+    symbols: Optional[str] = None,
+):
+    await websocket.accept()
+    
+    # 1. Authenticate token
+    from app.auth import verify_token
+    try:
+        payload = verify_token(token)
+        user_id = payload.get("sub")
+        if not user_id:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+    except Exception:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    # 2. Check account ownership
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        account = db.query(models.BrokerAccount).filter(
+            models.BrokerAccount.id == account_id,
+            models.BrokerAccount.user_id == user_id,
+            models.BrokerAccount.is_active == True,
+        ).first()
+        if not account:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+    finally:
+        db.close()
+
+    # 3. Subscribe to PubSub channel
+    import redis
+    import asyncio
+    
+    r = redis.Redis.from_url(settings.REDIS_URL)
+    pubsub = r.pubsub()
+    pubsub.subscribe(f"channel:quotes:{account_id}")
+
+    sub_symbols = [s.strip().upper() for s in symbols.split(",")] if symbols else []
+
+    try:
+        last_heartbeat = asyncio.get_event_loop().time()
+        while True:
+            message = pubsub.get_message(ignore_subscribe_messages=True, timeout=0.1)
+            if message:
+                data_str = message["data"].decode("utf-8")
+                try:
+                    quote_data = json.loads(data_str)
+                    quote_symbol = str(quote_data.get("symbol", "")).upper()
+                    
+                    # Quote age & stale-data warning check
+                    quote_time_str = quote_data.get("time") or quote_data.get("brokerTime")
+                    stale = False
+                    age = None
+                    if quote_time_str:
+                        try:
+                            qt = datetime.fromisoformat(quote_time_str.replace("Z", "+00:00"))
+                            age = (datetime.now(UTC) - qt).total_seconds()
+                            stale = age > settings.QUOTE_STALE_AFTER_SECONDS
+                        except Exception:
+                            pass
+                    
+                    quote_data["quote_age_seconds"] = age
+                    quote_data["stale_data_warning"] = stale
+
+                    if not sub_symbols or quote_symbol in sub_symbols:
+                        await websocket.send_json({
+                            "type": "quote",
+                            "data": quote_data
+                        })
+                except Exception:
+                    pass
+
+            # Heartbeat (every 10 seconds)
+            now_time = asyncio.get_event_loop().time()
+            if now_time - last_heartbeat > 10.0:
+                await websocket.send_json({"type": "heartbeat", "timestamp": datetime.utcnow().isoformat()})
+                last_heartbeat = now_time
+
+            # Small sleep to yield execution loop
+            await asyncio.sleep(0.01)
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).error(f"Quotes WebSocket error: {exc}", exc_info=True)
+    finally:
+        try:
+            pubsub.unsubscribe()
+            pubsub.close()
+        except Exception:
+            pass

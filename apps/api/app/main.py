@@ -8,7 +8,7 @@ from datetime import datetime
 from app.config import settings
 from app.database import engine, SessionLocal
 from app import models
-from app.routes import auth, signals, ai, strategies, backtest, trades, journal, admin, broker_accounts, health, notifications, market, scanner
+from app.routes import auth, signals, ai, strategies, backtest, trades, orders, journal, admin, broker_accounts, health, notifications, market, scanner
 
 # Configure logging
 logging.basicConfig(
@@ -18,8 +18,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# Create tables
-models.Base.metadata.create_all(bind=engine)
+# Tables created via Alembic migrations in production
 
 
 @asynccontextmanager
@@ -74,6 +73,7 @@ app.include_router(signals.router, prefix="/api/signals", tags=["Signals"])
 app.include_router(strategies.router, prefix="/api/strategies", tags=["Strategies"])
 app.include_router(backtest.router, prefix="/api/backtest", tags=["Backtesting"])
 app.include_router(trades.router, prefix="/api/trades", tags=["Trading"])
+app.include_router(orders.router, prefix="/api/orders", tags=["Orders"])
 app.include_router(broker_accounts.router, prefix="/api/broker-accounts", tags=["Broker Accounts"])
 app.include_router(journal.router, prefix="/api/journal", tags=["Journal"])
 app.include_router(notifications.router, prefix="/api/notifications", tags=["Notifications"])

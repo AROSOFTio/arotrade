@@ -296,16 +296,16 @@ docker compose up -d
 
 ## Enabling Live Trading
 
-⚠️ **CRITICAL: Live trading is disabled by default for security.**
+Live trading parameters are set to default to **`true`** for this deployment workspace.
 
-To enable live trading:
+### 5.1 Configure Environment
 
-### 5.1 Update Environment
+If you need to disable or toggle live trading:
 
 ```bash
 nano .env
-# Change: ENABLE_LIVE_TRADING=false
-# To:     ENABLE_LIVE_TRADING=true
+# Change: ENABLE_LIVE_TRADING=true
+# To:     ENABLE_LIVE_TRADING=false
 ```
 
 ### 5.2 Restart API

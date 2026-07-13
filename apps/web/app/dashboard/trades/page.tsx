@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { CandlestickChart, CheckCircle2, RefreshCw } from 'lucide-react'
+import { CandlestickChart, CheckCircle2, RefreshCw, Pencil, Scissors, ShieldCheck, X } from 'lucide-react'
 
 import { apiRequest, errorMessage, formatDate, formatNumber } from '../../components/api'
 import { EmptyState } from '../../components/empty-state'
@@ -42,6 +42,20 @@ export default function TradesPage() {
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
 
+  // Edit SL/TP
+  const [editingProtectionId, setEditingProtectionId] = useState<number | null>(null)
+  const [editSl, setEditSl] = useState('')
+  const [editTp, setEditTp] = useState('')
+  const [protectionSaving, setProtectionSaving] = useState(false)
+
+  // Partial Close
+  const [partialCloseId, setPartialCloseId] = useState<number | null>(null)
+  const [partialVolume, setPartialVolume] = useState('')
+  const [partialClosing, setPartialClosing] = useState(false)
+
+  // Reconcile
+  const [reconciling, setReconciling] = useState(false)
+
   const loadTrades = async (showLoading = true) => {
     if (showLoading) setLoading(true)
     try {
@@ -73,6 +87,73 @@ export default function TradesPage() {
       await loadTrades(false)
     } catch (requestError) {
       setError(errorMessage(requestError))
+    }
+  }
+
+  const saveProtection = async (tradeId: number) => {
+    setProtectionSaving(true)
+    setError('')
+    try {
+      const body: any = {}
+      if (editSl) body.stop_loss = parseFloat(editSl)
+      if (editTp) body.take_profit = parseFloat(editTp)
+      await apiRequest(`/trades/${tradeId}/protection`, {
+        method: 'PATCH',
+        body: JSON.stringify(body)
+      })
+      setMessage('Protection levels updated.')
+      setEditingProtectionId(null)
+      await loadTrades(false)
+    } catch (e) {
+      setError(errorMessage(e))
+    } finally {
+      setProtectionSaving(false)
+    }
+  }
+
+  const doPartialClose = async (tradeId: number) => {
+    if (!partialVolume) return
+    setPartialClosing(true)
+    setError('')
+    try {
+      await apiRequest(`/trades/${tradeId}/partial-close`, {
+        method: 'POST',
+        body: JSON.stringify({ volume: parseFloat(partialVolume) })
+      })
+      setMessage(`Partial close of ${partialVolume} lots executed.`)
+      setPartialCloseId(null)
+      setPartialVolume('')
+      await loadTrades(false)
+    } catch (e) {
+      setError(errorMessage(e))
+    } finally {
+      setPartialClosing(false)
+    }
+  }
+
+  const forceReconcile = async () => {
+    // Reconcile the first trade's broker info — in production this would reconcile per-account
+    setReconciling(true)
+    setError('')
+    try {
+      // Try reconciling via the trades endpoint which should handle it
+      await apiRequest('/trades/reconcile', { method: 'POST' })
+      setMessage('Reconciliation complete. Refresh to see results.')
+      await loadTrades(false)
+    } catch (e) {
+      // Fall back: try per broker-account endpoint
+      try {
+        const accounts = await apiRequest<{id: number}[]>('/broker-accounts')
+        for (const a of accounts) {
+          await apiRequest(`/broker-accounts/${a.id}/reconcile`, { method: 'POST' })
+        }
+        setMessage('Reconciliation complete across all accounts.')
+        await loadTrades(false)
+      } catch (e2) {
+        setError(errorMessage(e2))
+      }
+    } finally {
+      setReconciling(false)
     }
   }
 
@@ -127,7 +208,15 @@ export default function TradesPage() {
         </div>
       )}
 
-      <div className="mb-4 flex justify-end">
+      <div className="mb-4 flex justify-end gap-2">
+        <button
+          type="button"
+          disabled={reconciling}
+          onClick={() => void forceReconcile()}
+          className="btn-secondary flex items-center gap-1.5 text-xs py-1.5 border-amber-200 text-amber-700 hover:bg-amber-50"
+        >
+          <ShieldCheck size={13} /> {reconciling ? 'Reconciling…' : 'Force Reconcile'}
+        </button>
         <button
           type="button"
           onClick={() => void loadTrades(true)}
@@ -243,49 +332,107 @@ export default function TradesPage() {
                       </td>
                       <td className="px-5 py-4">
                         {trade.status === 'open' ? (
-                          isPaper ? (
-                            closingId === trade.id ? (
-                              <div className="flex items-center gap-2">
-                                <input
-                                  aria-label={`Exit price for ${trade.symbol}`}
-                                  type="number"
-                                  step="any"
-                                  className="input-base h-9 w-28"
-                                  value={exitPrice}
-                                  onChange={(event) => setExitPrice(event.target.value)}
-                                />
-                                <button
-                                  type="button"
-                                  className="btn-primary min-h-9 px-3"
-                                  disabled={!exitPrice}
-                                  onClick={() => void closeTrade(trade.id, true)}
-                                >
-                                  <CheckCircle2 size={15} aria-hidden="true" />
-                                  Close
+                          <div className="flex flex-col gap-1.5">
+                            {/* Edit SL/TP */}
+                            {editingProtectionId === trade.id ? (
+                              <div className="flex flex-col gap-1.5 rounded-md border border-blue-200 bg-blue-50/50 p-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[10px] font-bold uppercase text-blue-700">Edit Protection</span>
+                                  <button type="button" onClick={() => setEditingProtectionId(null)} className="text-slate-400 hover:text-slate-600"><X size={12} /></button>
+                                </div>
+                                <div className="grid grid-cols-2 gap-1.5">
+                                  <label className="block">
+                                    <span className="text-[10px] font-semibold text-red-600">SL</span>
+                                    <input type="number" step="0.00001" className="input-base mt-0.5 h-7 w-full text-xs" value={editSl} onChange={(e) => setEditSl(e.target.value)} />
+                                  </label>
+                                  <label className="block">
+                                    <span className="text-[10px] font-semibold text-[#15803d]">TP</span>
+                                    <input type="number" step="0.00001" className="input-base mt-0.5 h-7 w-full text-xs" value={editTp} onChange={(e) => setEditTp(e.target.value)} />
+                                  </label>
+                                </div>
+                                <button type="button" disabled={protectionSaving} onClick={() => void saveProtection(trade.id)} className="btn-primary h-7 text-[11px] w-full">
+                                  {protectionSaving ? 'Saving…' : 'Update Levels'}
                                 </button>
                               </div>
                             ) : (
                               <button
                                 type="button"
-                                className="btn-secondary min-h-9 px-3"
-                                onClick={() => { setClosingId(trade.id); setExitPrice('') }}
+                                className="btn-secondary flex items-center gap-1 min-h-7 px-2 text-[11px]"
+                                onClick={() => {
+                                  setEditingProtectionId(trade.id)
+                                  setEditSl(String(trade.stop_loss))
+                                  setEditTp(trade.take_profit ? String(trade.take_profit) : '')
+                                }}
                               >
-                                Close Paper Trade
+                                <Pencil size={11} /> Edit SL/TP
                               </button>
-                            )
-                          ) : (
-                            <button
-                              type="button"
-                              className="btn-secondary min-h-9 px-3 border-red-200 text-red-700 hover:bg-red-50"
-                              onClick={() => {
-                                if (window.confirm('Close this position on your MT5 terminal?')) {
-                                  void closeTrade(trade.id, false)
-                                }
-                              }}
-                            >
-                              Close MT5 Position
-                            </button>
-                          )
+                            )}
+
+                            {/* Partial Close */}
+                            {!isPaper && (
+                              partialCloseId === trade.id ? (
+                                <div className="flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 p-2">
+                                  <label className="flex-1">
+                                    <span className="text-[10px] font-semibold text-amber-700">Vol</span>
+                                    <input type="number" step="0.01" min="0.01" className="input-base mt-0.5 h-7 w-full text-xs" value={partialVolume} onChange={(e) => setPartialVolume(e.target.value)} />
+                                  </label>
+                                  <div className="flex gap-1 self-end">
+                                    <button type="button" disabled={partialClosing || !partialVolume} onClick={() => void doPartialClose(trade.id)} className="btn-primary h-7 px-2 text-[11px]">
+                                      {partialClosing ? '…' : 'Go'}
+                                    </button>
+                                    <button type="button" onClick={() => setPartialCloseId(null)} className="text-slate-400 hover:text-slate-600"><X size={12} /></button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="btn-secondary flex items-center gap-1 min-h-7 px-2 text-[11px] border-amber-200 text-amber-700 hover:bg-amber-50"
+                                  onClick={() => { setPartialCloseId(trade.id); setPartialVolume('') }}
+                                >
+                                  <Scissors size={11} /> Partial Close
+                                </button>
+                              )
+                            )}
+
+                            {/* Full Close */}
+                            {isPaper ? (
+                              closingId === trade.id ? (
+                                <div className="flex items-center gap-1.5">
+                                  <input
+                                    aria-label={`Exit price for ${trade.symbol}`}
+                                    type="number"
+                                    step="any"
+                                    className="input-base h-7 w-24 text-xs"
+                                    value={exitPrice}
+                                    onChange={(event) => setExitPrice(event.target.value)}
+                                  />
+                                  <button type="button" className="btn-primary h-7 px-2 text-[11px]" disabled={!exitPrice} onClick={() => void closeTrade(trade.id, true)}>
+                                    <CheckCircle2 size={12} /> Close
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="btn-secondary flex items-center gap-1 min-h-7 px-2 text-[11px]"
+                                  onClick={() => { setClosingId(trade.id); setExitPrice('') }}
+                                >
+                                  Close Paper
+                                </button>
+                              )
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn-secondary flex items-center gap-1 min-h-7 px-2 text-[11px] border-red-200 text-red-700 hover:bg-red-50"
+                                onClick={() => {
+                                  if (window.confirm('Close this position on your MT5 terminal?')) {
+                                    void closeTrade(trade.id, false)
+                                  }
+                                }}
+                              >
+                                Close MT5
+                              </button>
+                            )}
+                          </div>
                         ) : (
                           <span className="text-xs text-slate-400">
                             {trade.exit_price ? `Exit ${formatNumber(trade.exit_price, 5)}` : 'Closed'}

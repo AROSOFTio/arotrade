@@ -32,7 +32,57 @@ ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp"}
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
 
-def _persist_analysis(db: Session, user_id: int, symbol: str, timeframe: str, prompt, result: dict) -> models.AIAnalysis:
+def _get_quote_and_candle_metrics(db: Session, broker_account_id: int, symbol: str, timeframe: str) -> dict:
+    from app.services.order_execution import resolve_broker_symbol
+    quote_time = None
+    quote_age_seconds = None
+    stale_data_warning = False
+    candle_close_time = None
+
+    try:
+        account = db.query(models.BrokerAccount).filter(models.BrokerAccount.id == broker_account_id).first()
+        if account and account.metaapi_account_id:
+            broker_symbol = resolve_broker_symbol(db, symbol, account)
+            # Fetch quote
+            quote = metaapi.get_symbol_price(account.metaapi_account_id, broker_symbol, require_fresh=False)
+            quote_time_str = quote.get("time") or quote.get("brokerTime")
+            if quote_time_str:
+                quote_time = datetime.fromisoformat(quote_time_str.replace("Z", "+00:00")).replace(tzinfo=None)
+                quote_age_seconds = (datetime.utcnow() - quote_time).total_seconds()
+                stale_data_warning = quote_age_seconds > settings.QUOTE_STALE_AFTER_SECONDS
+            
+            # Fetch last candle close time
+            tf = metaapi.normalize_timeframe(timeframe)
+            candles = metaapi.get_candles(account.metaapi_account_id, broker_symbol, tf, 2)
+            if candles:
+                last_candle = candles[-1]
+                last_candle_time_str = last_candle.get("time") or last_candle.get("brokerTime")
+                if last_candle_time_str:
+                    candle_close_time = datetime.fromisoformat(last_candle_time_str.replace("Z", "+00:00")).replace(tzinfo=None)
+    except Exception:
+        pass
+
+    return {
+        "quote_time": quote_time,
+        "quote_age_seconds": quote_age_seconds,
+        "stale_data_warning": stale_data_warning,
+        "candle_close_time": candle_close_time,
+    }
+
+
+def _persist_analysis(
+    db: Session,
+    user_id: int,
+    symbol: str,
+    timeframe: str,
+    prompt,
+    result: dict,
+    broker_account_id: Optional[int] = None,
+) -> models.AIAnalysis:
+    metrics = {}
+    if broker_account_id:
+        metrics = _get_quote_and_candle_metrics(db, broker_account_id, symbol, timeframe)
+
     analysis = models.AIAnalysis(
         user_id=user_id,
         symbol=symbol.upper(),
@@ -53,6 +103,10 @@ def _persist_analysis(db: Session, user_id: int, symbol: str, timeframe: str, pr
         invalidation=result["invalidation"],
         news_warning=result["news_warning"],
         risk_warning=result["risk_warning"],
+        candle_close_time=metrics.get("candle_close_time"),
+        quote_time=metrics.get("quote_time"),
+        quote_age_seconds=metrics.get("quote_age_seconds"),
+        stale_data_warning=metrics.get("stale_data_warning", False),
     )
     db.add(analysis)
     db.commit()
@@ -99,7 +153,15 @@ async def analyze_chart(
         prompt=request.prompt,
         price_context=_live_context(account.metaapi_account_id, request.symbol, request.timeframe),
     )
-    return _persist_analysis(db, current_user["user_id"], request.symbol, request.timeframe, request.prompt, result)
+    return _persist_analysis(
+        db,
+        current_user["user_id"],
+        request.symbol,
+        request.timeframe,
+        request.prompt,
+        result,
+        request.broker_account_id,
+    )
 
 
 @router.post("/analyze-image", response_model=schemas.AIAnalysisResponse)
@@ -150,7 +212,15 @@ async def analyze_image_upload(
         image_mime=file.content_type,
         price_context=_live_context(account.metaapi_account_id, symbol, timeframe),
     )
-    return _persist_analysis(db, current_user["user_id"], symbol, timeframe, prompt or None, result)
+    return _persist_analysis(
+        db,
+        current_user["user_id"],
+        symbol,
+        timeframe,
+        prompt or None,
+        result,
+        broker_account_id,
+    )
 
 
 def _extract_sotd_symbol(result: dict) -> str:

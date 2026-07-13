@@ -170,6 +170,10 @@ class AIAnalysisResponse(BaseModel):
     invalidation: str
     news_warning: Optional[str]
     risk_warning: Optional[str]
+    candle_close_time: Optional[datetime] = None
+    quote_time: Optional[datetime] = None
+    quote_age_seconds: Optional[float] = None
+    stale_data_warning: Optional[bool] = None
     created_at: datetime
 
     class Config:
@@ -351,9 +355,100 @@ class TradeResponse(BaseModel):
     submitted_at: Optional[datetime] = None
     filled_at: Optional[datetime] = None
     created_at: datetime
+    # Extended broker fields
+    broker_account_id: Optional[int] = None
+    execution_mode: Optional[str] = None
+    provider: Optional[str] = None
+    broker_symbol: Optional[str] = None
+    broker_position_id: Optional[str] = None
+    broker_deal_id: Optional[str] = None
+    requested_price: Optional[float] = None
+    actual_fill_price: Optional[float] = None
+    requested_volume: Optional[float] = None
+    actual_volume: Optional[float] = None
+    commission: Optional[float] = None
+    swap: Optional[float] = None
+    broker_profit: Optional[float] = None
+    reconciliation_status: Optional[str] = None
+    opened_time: Optional[datetime] = None
+    closed_time: Optional[datetime] = None
 
     class Config:
         from_attributes = True
+
+
+# ---------------------------------------------------------------------------
+# Manual order schemas
+# ---------------------------------------------------------------------------
+
+class ManualOrderPreviewRequest(BaseModel):
+    broker_account_id: int
+    symbol: str
+    direction: Literal["buy", "sell"]
+    stop_loss: float = Field(gt=0)
+    take_profit: Optional[float] = None
+    volume: Optional[float] = Field(default=None, gt=0, description="Fixed volume in lots. Omit to use risk-percent sizing.")
+    risk_percent: Optional[float] = Field(default=None, gt=0, le=5, description="Risk percent of equity. Used when volume is omitted.")
+
+    @model_validator(mode="after")
+    def validate_sizing(self):
+        if self.volume is None and self.risk_percent is None:
+            raise ValueError("Provide either volume (fixed lots) or risk_percent for backend sizing.")
+        return self
+
+
+class ManualOrderPreviewResponse(BaseModel):
+    broker_symbol: str
+    direction: str
+    bid: float
+    ask: float
+    spread: float
+    observed_price: float
+    stop_loss: float
+    take_profit: Optional[float]
+    calculated_volume: float
+    risk_amount: float
+    required_margin: float
+    free_margin_after: float
+    equity: float
+    balance: float
+    account_currency: str
+    quote_time: Optional[str] = None
+    quote_age_seconds: Optional[float] = None
+    stale_data_warning: bool = False
+    risk_warnings: List[str] = []
+
+
+class ManualOrderExecuteRequest(BaseModel):
+    broker_account_id: int
+    symbol: str
+    direction: Literal["buy", "sell"]
+    stop_loss: float = Field(gt=0)
+    take_profit: Optional[float] = None
+    volume: Optional[float] = Field(default=None, gt=0)
+    risk_percent: Optional[float] = Field(default=None, gt=0, le=5)
+    idempotency_key: str = Field(min_length=8, max_length=128)
+
+    @model_validator(mode="after")
+    def validate_sizing(self):
+        if self.volume is None and self.risk_percent is None:
+            raise ValueError("Provide either volume (fixed lots) or risk_percent for backend sizing.")
+        return self
+
+
+class PositionProtectionUpdate(BaseModel):
+    stop_loss: Optional[float] = Field(default=None, gt=0)
+    take_profit: Optional[float] = None
+
+    @model_validator(mode="after")
+    def validate_at_least_one(self):
+        if self.stop_loss is None and self.take_profit is None:
+            raise ValueError("Provide at least one of stop_loss or take_profit.")
+        return self
+
+
+class PositionCloseRequest(BaseModel):
+    volume: Optional[float] = Field(default=None, gt=0, description="Partial close volume. Omit for full close.")
 
 
 # Journal Schemas

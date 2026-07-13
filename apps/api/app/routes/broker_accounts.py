@@ -276,3 +276,20 @@ async def deactivate_broker_account(
     db.commit()
     db.refresh(account)
     return account
+
+
+@router.post("/{account_id}/reconcile")
+async def reconcile_broker_account(
+    account_id: int,
+    current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Force execution of reconciliation for a specific broker account."""
+    from app.services.order_execution import reconcile_account, ExecutionError
+    try:
+        res = reconcile_account(account_id, current_user["user_id"], db)
+        return res
+    except ExecutionError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Reconciliation failed: {exc}")
