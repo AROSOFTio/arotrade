@@ -198,6 +198,14 @@ def platform_health_summary(db: Session) -> dict[str, Any]:
 
 
 def live_entry_block_reason(control: dict[str, Any]) -> str | None:
+    if control.get("emergency_stop", False):
+        return "Emergency stop is active. New live orders are blocked."
+    if control.get("close_only_mode", False):
+        return "Close-only mode is active. New live entries are blocked."
+    if not getattr(settings, "LIVE_TRADING_ALLOWED", True):
+        return "LIVE_TRADING_ALLOWED=false in platform configuration."
+    if not getattr(settings, "NEW_LIVE_ENTRIES_ALLOWED", True):
+        return "NEW_LIVE_ENTRIES_ALLOWED=false in platform configuration."
     if not control.get("live_trading_allowed", True):
         return "Platform owner has paused live trading. Your live preference remains saved."
     if not control.get("new_live_entries_allowed", True):

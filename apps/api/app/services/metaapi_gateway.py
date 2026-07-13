@@ -52,7 +52,7 @@ class QuoteStaleError(MetaApiError):
     def __init__(self, age_seconds: float):
         super().__init__(
             f"Broker quote is {age_seconds:.0f}s old (limit {settings.QUOTE_STALE_AFTER_SECONDS}s). "
-            "Execution blocked — do not trade on stale prices.",
+            "Execution blocked ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â do not trade on stale prices.",
             503,
         )
 
@@ -240,7 +240,7 @@ def get_symbol_price(
             except QuoteStaleError:
                 raise
             except Exception:
-                pass  # Cannot parse time — let execution service decide
+                pass  # Cannot parse time ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â let execution service decide
 
     return quote
 
@@ -261,6 +261,40 @@ def extract_observed_price(quote: dict, direction: str) -> float:
         return 0.0
 
 
+
+def calculate_margin(
+    metaapi_account_id: str,
+    symbol: str,
+    direction: str,
+    volume: float,
+    entry_price: float,
+) -> dict:
+    """Ask MetaApi/broker to calculate required margin for the exact order."""
+    direction_lower = direction.lower()
+    if direction_lower not in ("buy", "sell"):
+        raise MetaApiError("Order direction must be 'buy' or 'sell'", 400)
+    payload = {
+        "symbol": symbol,
+        "type": "ORDER_TYPE_BUY" if direction_lower == "buy" else "ORDER_TYPE_SELL",
+        "volume": round(volume, 8),
+        "openPrice": entry_price,
+    }
+    response = _request(
+        "POST",
+        f"{_client_base()}/users/current/accounts/{metaapi_account_id}/calculate-margin",
+        payload,
+        timeout=45.0,
+    )
+    result = response.json()
+    if not isinstance(result, dict):
+        raise MetaApiError("Broker margin calculation returned an invalid response", 502)
+    margin = result.get("margin") or result.get("requiredMargin") or result.get("required_margin")
+    try:
+        parsed = float(margin)
+    except (TypeError, ValueError) as exc:
+        raise MetaApiError("Broker margin calculation did not return required margin", 502) from exc
+    result["requiredMargin"] = parsed
+    return result
 # ---------------------------------------------------------------------------
 # Candles
 # ---------------------------------------------------------------------------
@@ -425,7 +459,7 @@ def place_market_order(
     Submit a market order.
 
     SAFETY RULES (enforced here, not just in the route):
-      - stop_loss is REQUIRED — no exceptions
+      - stop_loss is REQUIRED ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â no exceptions
       - direction must be 'buy' or 'sell'
       - symbol is the BROKER symbol (not canonical)
     """

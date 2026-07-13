@@ -24,7 +24,7 @@ class SignalStatus(str, enum.Enum):
 
 
 class SignalLifecycleStatus(str, enum.Enum):
-    """Full signal lifecycle — replaces the coarse SignalStatus for auto signals."""
+    """Full signal lifecycle Ã¢â‚¬â€ replaces the coarse SignalStatus for auto signals."""
     DETECTED = "detected"
     VALIDATING = "validating"
     PENDING_APPROVAL = "pending_approval"
@@ -43,8 +43,8 @@ class SignalLifecycleStatus(str, enum.Enum):
 
 
 class ExecutionMode(str, enum.Enum):
-    """Distinct execution modes — never confuse paper sim with broker orders."""
-    PAPER = "paper"           # Internal simulation — no broker involved
+    """Distinct execution modes Ã¢â‚¬â€ never confuse paper sim with broker orders."""
+    PAPER = "paper"           # Internal simulation Ã¢â‚¬â€ no broker involved
     BROKER_DEMO = "broker_demo"  # Real MetaApi order on an MT5 demo account
     LIVE = "live"             # Real MetaApi order on an MT5 live account
 
@@ -236,7 +236,7 @@ class Signal(Base):
     strategy_id = Column(Integer, nullable=True)        # FK to strategies.id
     broker_account_id = Column(Integer, ForeignKey("broker_accounts.id"), nullable=True)
 
-    # Symbols — both canonical and exact broker symbol
+    # Symbols Ã¢â‚¬â€ both canonical and exact broker symbol
     symbol = Column(String(30), nullable=False)         # canonical display symbol
     canonical_symbol = Column(String(30), nullable=True)
     broker_symbol = Column(String(30), nullable=True)   # exact broker symbol (e.g. XAUUSDm)
@@ -554,7 +554,7 @@ class AdminSetting(Base):
 
 
 # ---------------------------------------------------------------------------
-# BrokerSymbol — canonical-to-broker symbol mapping with full specification
+# BrokerSymbol Ã¢â‚¬â€ canonical-to-broker symbol mapping with full specification
 # ---------------------------------------------------------------------------
 
 class BrokerSymbol(Base):
@@ -598,7 +598,7 @@ class BrokerSymbol(Base):
 
 
 # ---------------------------------------------------------------------------
-# ScannerProfile — per-user automatic scanner configuration
+# ScannerProfile Ã¢â‚¬â€ per-user automatic scanner configuration
 # ---------------------------------------------------------------------------
 
 class ScannerProfile(Base):
@@ -650,12 +650,12 @@ class ScannerProfile(Base):
 
 
 # ---------------------------------------------------------------------------
-# Signal — extended with broker fields and full lifecycle
+# Signal Ã¢â‚¬â€ extended with broker fields and full lifecycle
 # ---------------------------------------------------------------------------
 # NOTE: The original Signal class at line ~225 remains unchanged for backward
 # compatibility.  New auto-signals use the extended fields below.
 # We ADD columns via migration; the ORM class here reflects the FINAL schema.
-# The Signal class is extended in-place — these patches are applied via
+# The Signal class is extended in-place Ã¢â‚¬â€ these patches are applied via
 # Alembic migration 005_scanner_signal_lifecycle.py.
 #
 # Fields added (all nullable for backward compat):
@@ -668,7 +668,7 @@ class ScannerProfile(Base):
 
 
 # ---------------------------------------------------------------------------
-# ExecutionIntent — idempotency guard for broker orders
+# ExecutionIntent Ã¢â‚¬â€ idempotency guard for broker orders
 # ---------------------------------------------------------------------------
 
 class ExecutionIntent(Base):
@@ -689,6 +689,7 @@ class ExecutionIntent(Base):
     broker_account_id = Column(Integer, ForeignKey("broker_accounts.id"), nullable=True)
 
     execution_mode = Column(String(20), nullable=False)  # paper / broker_demo / live
+    idempotency_key = Column(String(128), unique=True, nullable=True)
     client_order_id = Column(String(64), unique=True, nullable=False)
 
     # Sizing inputs (all stored for audit)
@@ -703,9 +704,12 @@ class ExecutionIntent(Base):
     raw_volume = Column(Float, nullable=True)
 
     # Execution state
-    status = Column(String(30), nullable=False, default="pending")  # pending/submitted/filled/failed/duplicate
+    status = Column(String(30), nullable=False, default="CREATED")
+    execution_state = Column(String(30), nullable=True)
     broker_order_id = Column(String(255), nullable=True)
     broker_position_id = Column(String(255), nullable=True)
+    broker_deal_id = Column(String(255), nullable=True)
+    broker_deal_ids = Column(JSON, nullable=True)
     request_payload = Column(JSON, nullable=True)
     broker_response = Column(JSON, nullable=True)
     error = Column(Text, nullable=True)

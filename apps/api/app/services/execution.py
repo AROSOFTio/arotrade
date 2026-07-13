@@ -41,9 +41,108 @@ class BrokerAccountMetrics:
     is_simulated: bool = False
 
 
+@dataclass
+class LiveAccountVerification:
+    broker: str
+    server: str
+    masked_login: str
+    currency: str
+    is_real: bool
+    trade_allowed: bool
+    connected: bool
+    synchronized: bool
+    raw_account: dict
+    raw_information: dict
+
 def utc_now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
+
+def _mask_login(value: object) -> str:
+    login = str(value or "")
+    if len(login) <= 4:
+        return "****" if login else "unknown"
+    return f"{login[:2]}****{login[-2:]}"
+
+
+def _info_bool(info: dict, *keys: str) -> bool | None:
+    for key in keys:
+        if key not in info:
+            continue
+        value = info.get(key)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered in ("true", "yes", "enabled", "allowed"):
+                return True
+            if lowered in ("false", "no", "disabled", "readonly", "read_only"):
+                return False
+    return None
+
+
+def _looks_real_account(*values: object) -> bool:
+    joined = " ".join(str(value or "") for value in values).lower()
+    if any(marker in joined for marker in ("demo", "contest", "practice", "trial")):
+        return False
+    return "real" in joined or "live" in joined
+
+
+def verify_live_broker_account(account: models.BrokerAccount) -> LiveAccountVerification:
+    """Verify a live account from fresh MetaApi data, not local DB account_type."""
+    if not account.metaapi_account_id:
+        raise ExecutionError("Broker account is not connected to MetaApi.")
+    try:
+        remote = metaapi.get_account(account.metaapi_account_id)
+        info = metaapi.get_account_information(account.metaapi_account_id)
+    except Exception as exc:
+        raise ExecutionError(f"MetaApi live-account verification failed: {exc}") from exc
+
+    state = str(remote.get("state") or account.connection_state or "").lower()
+    connection = str(remote.get("connectionStatus") or remote.get("connection_state") or "").lower()
+    sync_state = str(
+        remote.get("synchronizationStatus")
+        or remote.get("synchronization_state")
+        or info.get("synchronizationStatus")
+        or ""
+    ).lower()
+    is_real = _looks_real_account(
+        info.get("accountType"),
+        info.get("type"),
+        info.get("account_type"),
+        remote.get("accountType"),
+        remote.get("type"),
+        remote.get("name"),
+    )
+    trade_allowed = _info_bool(info, "tradeAllowed", "trade_allowed", "tradingAllowed")
+    connected = state == "deployed" and connection == "connected"
+    synchronized = sync_state in ("synchronized", "synchronised", "connected")
+
+    verification = LiveAccountVerification(
+        broker=str(remote.get("broker") or account.broker or "unknown"),
+        server=str(remote.get("server") or account.server or "unknown"),
+        masked_login=_mask_login(remote.get("login") or info.get("login") or account.account_id),
+        currency=str(info.get("currency") or account.currency or "USD"),
+        is_real=is_real,
+        trade_allowed=bool(trade_allowed),
+        connected=connected,
+        synchronized=synchronized,
+        raw_account=remote,
+        raw_information=info,
+    )
+
+    failures: list[str] = []
+    if not verification.is_real:
+        failures.append("broker reports this is not a REAL ACCOUNT")
+    if trade_allowed is not True:
+        failures.append("broker tradeAllowed is not true")
+    if not verification.connected:
+        failures.append("MetaApi account is not deployed and connected")
+    if not verification.synchronized:
+        failures.append("MetaApi account is not synchronized")
+    if failures:
+        raise ExecutionError("Live account verification failed: " + "; ".join(failures))
+    return verification
 
 def _required_account_float(info: dict, *keys: str) -> float:
     for key in keys:
@@ -265,16 +364,22 @@ def execute_signal_trade(
             models.Trade.status == models.TradeStatus.OPEN,
         ).first()
         if existing_trade:
-            raise ExecutionError("Signal already has an open trade.")
+            return existing_trade
 
         existing_intent = db.query(models.ExecutionIntent).filter(
             models.ExecutionIntent.signal_id == signal_id,
             models.ExecutionIntent.execution_mode == execution_mode,
-            models.ExecutionIntent.status.in_(["pending", "submitted", "uncertain", "filled"]),
+            models.ExecutionIntent.status.in_(["CREATED", "VALIDATING", "SUBMITTING", "BROKER_ACCEPTED", "FILLED", "UNCERTAIN"]),
         ).first()
         if existing_intent:
-            raise ExecutionError("Execution intent is already active for this signal.")
+            existing_trade_for_intent = db.query(models.Trade).filter(
+                models.Trade.execution_intent_id == existing_intent.id,
+            ).first()
+            if existing_trade_for_intent:
+                return existing_trade_for_intent
+            raise ExecutionError(f"Execution intent is already {existing_intent.status} for this signal.")
 
+        live_verification = verify_live_broker_account(account) if execution_mode == "live" else None
         broker_symbol = resolve_signal_broker_symbol(db, signal, account)
 
         # Get MT5 Quote and Specifications
@@ -284,7 +389,7 @@ def execute_signal_trade(
         except Exception as exc:
             raise ExecutionError(f"Failed to fetch broker data for {broker_symbol}: {exc}")
 
-        spec = spec_from_metaapi_specification(spec_dict)
+        spec = spec_from_metaapi_specification(spec_dict, quote)
         if not spec:
             raise ExecutionError(f"Incomplete broker specifications for {broker_symbol}.")
 
@@ -304,13 +409,14 @@ def execute_signal_trade(
 
         # Backend Sizing (equity, risk_percent, prices, specs)
         risk_percent = signal.scanner_profile.risk_percent if signal.scanner_profile else user.default_risk_percent
+        if execution_mode == "live" and risk_percent > 0.25:
+            raise ExecutionError("Live order risk exceeds maximum 0.25% account risk per trade.")
         sizing = calculate_position_size(
             equity=equity,
             risk_percent=risk_percent,
             entry_price=observed_price,
             stop_loss=signal.stop_loss,
             spec=spec,
-            free_margin=free_margin,
             direction=signal.signal_type,
             platform_max_volume=settings.MAX_LIVE_ORDER_VOLUME
         )
@@ -323,6 +429,34 @@ def execute_signal_trade(
             models.Trade.status == models.TradeStatus.OPEN,
         ).count()
         daily_loss = _get_daily_loss(db, user.id)
+
+        margin_result = {"requiredMargin": 0.0, "freeMarginAfterTrade": free_margin}
+        if execution_mode in ("broker_demo", "live"):
+            try:
+                margin_result = metaapi.calculate_margin(
+                    account.metaapi_account_id,
+                    broker_symbol,
+                    signal.signal_type,
+                    sizing.final_volume,
+                    observed_price,
+                )
+            except Exception as exc:
+                raise ExecutionError(f"Broker margin calculation failed: {exc}") from exc
+            required_margin = float(margin_result.get("requiredMargin") or 0.0)
+            free_after_trade = free_margin - required_margin
+            reserve_percent = float(getattr(settings, "FREE_MARGIN_RESERVE_PERCENT", 10.0))
+            reserve_amount = equity * reserve_percent / 100.0
+            margin_result["freeMarginAfterTrade"] = free_after_trade
+            if required_margin <= 0:
+                raise ExecutionError("Broker margin calculation returned zero or invalid required margin.")
+            if required_margin > free_margin:
+                raise ExecutionError(
+                    f"Insufficient free margin. Required margin {required_margin:.2f}, current free margin {free_margin:.2f}."
+                )
+            if free_after_trade < reserve_amount:
+                raise ExecutionError(
+                    f"Free margin after trade {free_after_trade:.2f} would be below reserve {reserve_amount:.2f}."
+                )
 
         quote_time_str = quote.get("time") or quote.get("brokerTime")
         risk_result = run_risk_checks(
@@ -339,6 +473,8 @@ def execute_signal_trade(
             daily_realized_pnl=daily_loss,
             equity=equity,
             free_margin=free_margin,
+            required_margin=float(margin_result.get("requiredMargin") or 0.0),
+            free_margin_after_trade=float(margin_result.get("freeMarginAfterTrade") or free_margin),
             is_jump_in=is_jump_in,
         )
         if not risk_result.approved:
@@ -358,7 +494,7 @@ def execute_signal_trade(
             equity_at_time=equity,
             risk_percent_at_time=risk_percent,
             tick_size_at_time=spec.tick_size,
-            tick_value_at_time=spec.tick_value,
+            tick_value_at_time=spec.loss_tick_value,
             stop_loss_distance=sizing.stop_loss_distance,
             loss_per_lot=sizing.loss_per_lot,
             raw_volume=sizing.raw_volume,
@@ -368,8 +504,10 @@ def execute_signal_trade(
                 "account_metrics_source": "simulation" if metrics.is_simulated else "metaapi",
                 "account_margin": metrics.margin,
                 "account_balance": metrics.balance,
+                "margin": margin_result,
+                "live_account_verification": live_verification.__dict__ if live_verification else None,
             },
-            status="pending",
+            status="CREATED",
         )
         db.add(intent)
         db.commit()
@@ -379,7 +517,7 @@ def execute_signal_trade(
         # EXECUTION: PAPER
         # -------------------------------------------------------------------
         if execution_mode == "paper":
-            intent.status = "filled"
+            intent.status = "FILLED"; intent.execution_state = "FILLED"
             intent.broker_order_id = f"paper-{uuid4()}"
             intent.broker_position_id = f"paper-pos-{uuid4()}"
             
@@ -421,7 +559,7 @@ def execute_signal_trade(
         # -------------------------------------------------------------------
         # EXECUTION: BROKER DEMO / LIVE (MetaApi Order Submission)
         # -------------------------------------------------------------------
-        intent.status = "submitted"
+        intent.status = "SUBMITTING"; intent.execution_state = "SUBMITTING"
         db.commit()
 
         comment = f"AT-{signal.id}"
@@ -457,7 +595,7 @@ def execute_signal_trade(
                     intent.broker_deal_id = confirmed[2] or intent.broker_deal_id
 
             if not intent.broker_position_id:
-                intent.status = "submitted"
+                intent.status = "SUBMITTING"; intent.execution_state = "SUBMITTING"
                 intent.error = (
                     "Broker accepted the order, but MetaApi has not confirmed the "
                     "open position ID yet. Reconciliation is pending."
@@ -465,7 +603,7 @@ def execute_signal_trade(
                 db.commit()
                 raise ExecutionError(intent.error)
 
-            intent.status = "filled"
+            intent.status = "FILLED"; intent.execution_state = "FILLED"
             db.commit()
 
             fill_price = float(order_result.get("openPrice") or observed_price)
@@ -509,7 +647,7 @@ def execute_signal_trade(
 
         except Exception as exc:
             # Idempotency recovery
-            intent.status = "uncertain"
+            intent.status = "UNCERTAIN"; intent.execution_state = "UNCERTAIN"
             intent.error = str(exc)
             db.commit()
 
@@ -524,13 +662,13 @@ def execute_signal_trade(
                     volume=sizing.final_volume,
                 )
                 if confirmed:
-                    intent.status = "filled"
+                    intent.status = "FILLED"; intent.execution_state = "FILLED"
                     intent.broker_order_id = confirmed[0] or intent.broker_order_id
                     intent.broker_position_id = confirmed[1]
                     intent.broker_deal_id = confirmed[2] or intent.broker_deal_id
                     db.commit()
 
-                if intent.status == "filled":
+                if intent.status == "FILLED":
                     # Create the local trade record
                     trade = models.Trade(
                         user_id=user.id,
@@ -568,7 +706,7 @@ def execute_signal_trade(
                     db.refresh(trade)
                     return trade
                 else:
-                    intent.status = "failed"
+                    intent.status = "REJECTED"; intent.execution_state = "REJECTED"
                     db.commit()
                     raise exc
 

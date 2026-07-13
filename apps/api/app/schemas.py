@@ -58,6 +58,8 @@ class PlatformTradingControlUpdate(BaseModel):
     broker_demo_trading_allowed: Optional[bool] = None
     paper_trading_allowed: Optional[bool] = None
     live_position_management_allowed: Optional[bool] = None
+    emergency_stop: Optional[bool] = None
+    close_only_mode: Optional[bool] = None
     reason: str = Field(min_length=5, max_length=500)
     confirmation: str = Field(min_length=3, max_length=32)
 
@@ -69,6 +71,8 @@ class PlatformTradingControlUpdate(BaseModel):
             self.broker_demo_trading_allowed,
             self.paper_trading_allowed,
             self.live_position_management_allowed,
+            self.emergency_stop,
+            self.close_only_mode,
         )
         if all(value is None for value in update_fields):
             raise ValueError("At least one platform control value must be provided")

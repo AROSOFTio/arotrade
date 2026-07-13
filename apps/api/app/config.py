@@ -64,7 +64,10 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     SMTP_FROM_EMAIL: str = "noreply@arotrade.com"
     SMTP_FROM_NAME: str = "AroTrade AI"
-    ENABLE_LIVE_TRADING: bool
+    ENABLE_LIVE_TRADING: bool = True
+    LIVE_TRADING_ALLOWED: bool = True
+    NEW_LIVE_ENTRIES_ALLOWED: bool = True
+    FREE_MARGIN_RESERVE_PERCENT: float = 10.0
     PAPER_TRADING_ENABLED: bool = True
     DEMO_INITIAL_BALANCE: float = 10000.0
     MIN_SIGNAL_CONFIDENCE: int = 70

@@ -202,7 +202,7 @@ def sync_broker_symbols_for_account(
         row.digits = _spec_value(spec, "digits")
         row.point = _spec_value(spec, "point")
         row.tick_size = _spec_value(spec, "tickSize", "tick_size")
-        row.tick_value = _spec_value(spec, "tickValue", "tick_value")
+        row.tick_value = _spec_value(spec, "lossTickValue", "loss_tick_value")
         row.contract_size = _spec_value(spec, "contractSize", "contract_size")
         row.volume_min = _spec_value(spec, "minVolume", "volumeMin", "volume_min")
         row.volume_max = _spec_value(spec, "maxVolume", "volumeMax", "volume_max")

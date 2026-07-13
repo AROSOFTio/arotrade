@@ -1,7 +1,7 @@
 """Comprehensive risk engine for pre-execution validation.
 
 This runs immediately before any broker-demo or live order submission.
-It is the FINAL gate — if any check fails, the order is blocked.
+It is the FINAL gate Ã¢â‚¬â€ if any check fails, the order is blocked.
 
 The engine is NOT called for paper (simulation) orders because paper
 orders carry no real financial risk.  Paper orders still go through
@@ -55,6 +55,8 @@ def run_risk_checks(
     daily_realized_pnl: float = 0.0,
     equity: float = 0.0,
     free_margin: float = 0.0,
+    required_margin: float = 0.0,
+    free_margin_after_trade: float = 0.0,
     is_jump_in: bool = False,
     now: Optional[datetime] = None,
 ) -> RiskCheckResult:
@@ -153,7 +155,7 @@ def run_risk_checks(
                         "Cannot execute on stale price."
                     )
         except Exception:
-            pass  # Cannot parse time — let it through but log
+            pass  # Cannot parse time Ã¢â‚¬â€ let it through but log
 
     if observed_price <= 0:
         r.block("Observed price is zero or negative.")
@@ -163,7 +165,7 @@ def run_risk_checks(
     # -----------------------------------------------------------------------
     signal_status = getattr(signal.status, "value", str(signal.status))
     if signal_status != "approved":
-        r.block(f"Signal status is '{signal_status}' — only approved signals can be executed.")
+        r.block(f"Signal status is '{signal_status}' Ã¢â‚¬â€ only approved signals can be executed.")
 
     if signal.valid_until and signal.valid_until <= now:
         r.block("Signal has expired.")
@@ -185,13 +187,13 @@ def run_risk_checks(
                 r.block(
                     f"Current price {observed_price:.5f} is {distance_pct * 100:.2f}% from entry zone mid "
                     f"{mid_entry:.5f} (limit {JUMP_IN_TOLERANCE_PCT * 100:.1f}%). "
-                    "Price has moved too far from the setup — jump-in blocked."
+                    "Price has moved too far from the setup Ã¢â‚¬â€ jump-in blocked."
                 )
         else:
             if not (signal.entry_min <= observed_price <= signal.entry_max):
                 r.block(
                     f"Observed price {observed_price:.5f} is outside entry zone "
-                    f"{signal.entry_min:.5f}–{signal.entry_max:.5f}."
+                    f"{signal.entry_min:.5f}Ã¢â‚¬â€œ{signal.entry_max:.5f}."
                 )
 
     # -----------------------------------------------------------------------
@@ -226,7 +228,7 @@ def run_risk_checks(
     # -----------------------------------------------------------------------
     # 10. Maximum drawdown
     # -----------------------------------------------------------------------
-    # (Would require knowing the starting balance — simplified for now)
+    # (Would require knowing the starting balance Ã¢â‚¬â€ simplified for now)
 
     # -----------------------------------------------------------------------
     # 11. Volume limits
@@ -239,15 +241,21 @@ def run_risk_checks(
             f"Volume {volume} exceeds platform maximum {settings.MAX_LIVE_ORDER_VOLUME} lots."
         )
 
+    risk_percent = signal.scanner_profile.risk_percent if getattr(signal, "scanner_profile", None) else user.default_risk_percent
+    if execution_mode == "live" and risk_percent > 0.25:
+        r.block("Live order risk exceeds maximum 0.25% account risk per trade.")
     # -----------------------------------------------------------------------
-    # 12. Free margin
+    # 12. Broker-calculated margin
     # -----------------------------------------------------------------------
-    if free_margin > 0 and volume > 0:
-        estimated_margin = volume * (observed_price or 0) * 0.01  # Rough 1% margin estimate
-        if estimated_margin > free_margin * 0.9:
+    if execution_mode in ("broker_demo", "live"):
+        if required_margin <= 0:
+            r.block("Broker-side margin calculation is required before execution.")
+        elif required_margin > free_margin:
             r.block(
-                f"Insufficient free margin. Estimated margin required: {estimated_margin:.2f}, "
+                f"Insufficient free margin. Required margin: {required_margin:.2f}, "
                 f"available: {free_margin:.2f}."
             )
+        elif free_margin_after_trade < 0:
+            r.block("Free margin after trade would be negative.")
 
     return r
