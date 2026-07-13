@@ -103,6 +103,11 @@ ALLOWED_ORIGINS=https://arotrader.arosoftlabs.com
 
 # Trading
 ENABLE_LIVE_TRADING=false  # KEEP FALSE
+METAAPI_TOKEN=<your-metaapi-token>
+METAAPI_REGION=london
+MAX_LIVE_ORDER_VOLUME=1.0
+MAX_LIVE_RISK_PERCENT=0.25
+NEXT_PUBLIC_MAX_LIVE_RISK_PERCENT=0.25
 ```
 
 **Optional - Deriv Demo API:**

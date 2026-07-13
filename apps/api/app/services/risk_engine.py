@@ -58,6 +58,7 @@ def run_risk_checks(
     free_margin: float = 0.0,
     required_margin: float = 0.0,
     free_margin_after_trade: float = 0.0,
+    effective_risk_percent: float = 0.0,
     is_jump_in: bool = False,
     now: Optional[datetime] = None,
 ) -> RiskCheckResult:
@@ -247,9 +248,12 @@ def run_risk_checks(
             f"Volume {volume} exceeds platform maximum {settings.MAX_LIVE_ORDER_VOLUME} lots."
         )
 
-    risk_percent = signal.scanner_profile.risk_percent if (signal and getattr(signal, "scanner_profile", None)) else user.default_risk_percent
-    if execution_mode == "live" and risk_percent > 0.25:
-        r.block("Live order risk exceeds maximum 0.25% account risk per trade.")
+    max_live_risk_percent = float(getattr(settings, "MAX_LIVE_RISK_PERCENT", 0.25))
+    if execution_mode == "live" and effective_risk_percent > max_live_risk_percent:
+        r.block(
+            f"Live order risk {effective_risk_percent:.2f}% exceeds maximum "
+            f"{max_live_risk_percent:.2f}% account risk per trade."
+        )
 
     # -----------------------------------------------------------------------
     # 12. Broker-calculated margin

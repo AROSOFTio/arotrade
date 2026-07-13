@@ -17,7 +17,7 @@ AroTrade AI by **AROSOFT Innovations** is a full-stack, AI-powered trading analy
 - **Trading Journal** – Track trades, emotions, lessons learned
 - **Risk Guardian** – Strict risk validation before execution
 - **Demo Trading** – Paper trading engine for testing
-- **Live Trading** – Multi-broker support (disabled by default)
+- **Live Trading** – Safety-gated MT5 broker-demo/live execution through MetaApi
 - **Admin Dashboard** – Audit logs, user management, signal monitoring
 - **API-First** – Extensible REST API for integrations
 
@@ -44,10 +44,10 @@ AroTrade AI by **AROSOFT Innovations** is a full-stack, AI-powered trading analy
 - Future: OpenAI, Groq, Claude, Ollama
 
 ### Trading Integrations
-- Deriv API (demo)
+- MetaApi REST gateway for MT4/MT5 broker accounts
 - Internal paper trading engine
-- MT5 bridge (placeholder)
-- Future: MetaApi, OANDA, cTrader
+- Optional Deriv credentials retained for users who actually trade on Deriv
+- Future: OANDA, cTrader
 
 ### Infrastructure
 - Docker & Docker Compose
@@ -160,6 +160,10 @@ GEMINI_MODEL=gemini-2.5-flash
 # Trading
 DERIV_APP_ID=<optional>
 ENABLE_LIVE_TRADING=false  # CRITICAL: Keep disabled by default
+METAAPI_TOKEN=<your-metaapi-token>
+METAAPI_REGION=london
+MAX_LIVE_RISK_PERCENT=0.25
+NEXT_PUBLIC_MAX_LIVE_RISK_PERCENT=0.25
 
 # Future Providers (commented)
 # OPENAI_API_KEY=
@@ -251,7 +255,9 @@ docker compose up -d
 - `GET /api/backtest/{id}` – Get results
 
 ### Trading
-- `POST /api/trades/execute` – Execute demo trade
+- `POST /api/orders/preview` – Preview a MetaApi manual market order
+- `POST /api/orders/execute` – Execute a MetaApi manual market order
+- `POST /api/trades/execute` – Deprecated; use `/api/orders/execute`
 - `GET /api/trades` – List trades
 - `GET /api/journal` – Trading journal
 
@@ -278,7 +284,6 @@ docker compose up -d
 - OpenAI integration
 - Groq integration
 - Claude integration
-- MetaApi MT5 bridge
 - OANDA integration
 - cTrader integration
 

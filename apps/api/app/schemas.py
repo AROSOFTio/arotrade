@@ -3,6 +3,11 @@ from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
 from enum import Enum
 
+from app.config import settings
+
+
+MAX_LIVE_RISK_PERCENT = float(getattr(settings, "MAX_LIVE_RISK_PERCENT", 0.25))
+
 
 # Auth Schemas
 class UserRegister(BaseModel):
@@ -388,7 +393,7 @@ class ManualOrderPreviewRequest(BaseModel):
     stop_loss: float = Field(gt=0)
     take_profit: Optional[float] = None
     volume: Optional[float] = Field(default=None, gt=0, description="Fixed volume in lots. Omit to use risk-percent sizing.")
-    risk_percent: Optional[float] = Field(default=None, gt=0, le=5, description="Risk percent of equity. Used when volume is omitted.")
+    risk_percent: Optional[float] = Field(default=None, gt=0, le=MAX_LIVE_RISK_PERCENT, description="Risk percent of equity. Used when volume is omitted.")
 
     @model_validator(mode="after")
     def validate_sizing(self):
@@ -408,6 +413,7 @@ class ManualOrderPreviewResponse(BaseModel):
     take_profit: Optional[float]
     calculated_volume: float
     risk_amount: float
+    effective_risk_percent: float
     required_margin: float
     free_margin_after: float
     equity: float
@@ -426,7 +432,7 @@ class ManualOrderExecuteRequest(BaseModel):
     stop_loss: float = Field(gt=0)
     take_profit: Optional[float] = None
     volume: Optional[float] = Field(default=None, gt=0)
-    risk_percent: Optional[float] = Field(default=None, gt=0, le=5)
+    risk_percent: Optional[float] = Field(default=None, gt=0, le=MAX_LIVE_RISK_PERCENT)
     idempotency_key: str = Field(min_length=8, max_length=128)
 
     @model_validator(mode="after")

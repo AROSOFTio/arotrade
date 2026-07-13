@@ -341,51 +341,54 @@ Reject a pending signal.
 
 ## Trading Endpoints
 
-### Execute Trade
+### Manual Order Preview
 
-**POST** `/trades/execute`
+**POST** `/orders/preview`
 
-Execute a demo or live trade.
+Preview a MetaApi MT4/MT5 manual market order without submitting it.
 
 **Request:**
 ```json
 {
+  "broker_account_id": 1,
   "symbol": "EURUSD",
-  "trade_type": "buy",
-  "entry_price": 1.0847,
+  "direction": "buy",
   "stop_loss": 1.0835,
   "take_profit": 1.0860,
-  "volume": 0.1,
-  "notes": "Signal execution"
+  "volume": 0.1
 }
 ```
 
 **Response:**
 ```json
 {
-  "id": 1,
-  "symbol": "EURUSD",
-  "trade_type": "buy",
-  "entry_price": 1.0847,
-  "entry_time": "2024-01-01T12:00:00",
-  "exit_price": null,
-  "exit_time": null,
+  "broker_symbol": "EURUSD",
+  "direction": "buy",
+  "observed_price": 1.0847,
   "stop_loss": 1.0835,
   "take_profit": 1.0860,
-  "volume": 0.1,
-  "profit_loss": null,
-  "status": "open",
-  "mode": "demo",
-  "created_at": "2024-01-01T12:00:00"
+  "calculated_volume": 0.1,
+  "risk_amount": 12.0,
+  "effective_risk_percent": 0.12,
+  "required_margin": 150.0,
+  "free_margin_after": 9850.0,
+  "risk_warnings": []
 }
 ```
 
-**Validations:**
-- Stop loss required
-- Risk per trade must not exceed user limit
-- Live trading must be enabled (both user and global)
-- Daily loss limit not exceeded
-- Max open trades not exceeded
+### Execute Manual Order
+
+**POST** `/orders/execute`
+
+Submit a validated MetaApi manual market order. Server-side checks remain authoritative; clients must not submit when preview returns blocking `risk_warnings`.
+
+**Request:** Same as preview, plus `idempotency_key`.
+
+### Deprecated Direct Execute
+
+**POST** `/trades/execute`
+
+Deprecated. Returns `410 Gone` with instructions to use `POST /api/orders/execute`.
 
 ---
 

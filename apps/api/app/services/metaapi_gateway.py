@@ -23,7 +23,10 @@ older metaapi.py module so existing callers work without changes.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, UTC
+from email.utils import parsedate_to_datetime
+from secrets import token_hex
 from typing import Optional
 from urllib.parse import quote
 
@@ -34,6 +37,10 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 PROVISIONING_BASE = "https://mt-provisioning-api-v1.agiliumtrade.agiliumtrade.ai"
+DEFAULT_HISTORY_START = "2000-01-01T00:00:00.000Z"
+DEFAULT_HISTORY_END = "2099-12-31T23:59:59.999Z"
+PROVISIONING_POLL_TIMEOUT_SECONDS = 120.0
+PROVISIONING_MAX_RETRY_AFTER_SECONDS = 10.0
 
 
 class MetaApiError(Exception):
@@ -73,6 +80,10 @@ def _headers() -> dict:
     return {"auth-token": settings.METAAPI_TOKEN, "Content-Type": "application/json"}
 
 
+def _transaction_headers() -> dict:
+    return {"transaction-id": token_hex(16)}
+
+
 def _client_base() -> str:
     region = settings.METAAPI_REGION or "london"
     return f"https://mt-client-api-v1.{region}.agiliumtrade.ai"
@@ -88,13 +99,35 @@ def _request(
     url: str,
     json_body: Optional[dict] = None,
     timeout: float = 30.0,
+    headers: Optional[dict] = None,
+    poll_accepted: bool = False,
+    accepted_timeout: float = PROVISIONING_POLL_TIMEOUT_SECONDS,
 ) -> httpx.Response:
-    try:
-        response = httpx.request(
-            method, url, headers=_headers(), json=json_body, timeout=timeout
-        )
-    except httpx.HTTPError as exc:
-        raise MetaApiError(f"MetaApi network error: {exc}") from exc
+    request_headers = _headers()
+    if headers:
+        request_headers.update(headers)
+    started = time.monotonic()
+
+    def _send() -> httpx.Response:
+        try:
+            return httpx.request(
+                method, url, headers=request_headers, json=json_body, timeout=timeout
+            )
+        except httpx.HTTPError as exc:
+            raise MetaApiError(f"MetaApi network error: {exc}") from exc
+
+    response = _send()
+    while poll_accepted and response.status_code == 202:
+        elapsed = time.monotonic() - started
+        remaining = accepted_timeout - elapsed
+        if remaining <= 0:
+            raise MetaApiError(
+                f"MetaApi provisioning request timed out after {accepted_timeout:.0f}s while waiting for HTTP 202 to complete",
+                504,
+            )
+        retry_after = _retry_after_seconds(response.headers.get("Retry-After"))
+        time.sleep(min(retry_after, remaining))
+        response = _send()
 
     if response.status_code >= 400:
         try:
@@ -106,6 +139,20 @@ def _request(
             response.status_code,
         )
     return response
+
+
+def _retry_after_seconds(value: Optional[str]) -> float:
+    if not value:
+        return 1.0
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        try:
+            retry_at = parsedate_to_datetime(value)
+            seconds = (retry_at - datetime.now(retry_at.tzinfo or UTC)).total_seconds()
+        except Exception:
+            seconds = 1.0
+    return max(0.1, min(seconds, PROVISIONING_MAX_RETRY_AFTER_SECONDS))
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +176,7 @@ def create_account(
         "server": server,
         "platform": platform,
         "magic": 0,
+        "manualTrades": True,
         "region": settings.METAAPI_REGION or "london",
         "keywords": ["AroTrade"],
     }
@@ -137,6 +185,8 @@ def create_account(
         f"{PROVISIONING_BASE}/users/current/accounts",
         payload,
         timeout=60.0,
+        headers=_transaction_headers(),
+        poll_accepted=True,
     )
     return response.json()
 
@@ -150,19 +200,39 @@ def get_account(metaapi_account_id: str) -> dict:
 
 
 def deploy_account(metaapi_account_id: str) -> None:
-    _request("POST", f"{PROVISIONING_BASE}/users/current/accounts/{metaapi_account_id}/deploy")
+    _request(
+        "POST",
+        f"{PROVISIONING_BASE}/users/current/accounts/{metaapi_account_id}/deploy",
+        headers=_transaction_headers(),
+        poll_accepted=True,
+    )
 
 
 def undeploy_account(metaapi_account_id: str) -> None:
-    _request("POST", f"{PROVISIONING_BASE}/users/current/accounts/{metaapi_account_id}/undeploy")
+    _request(
+        "POST",
+        f"{PROVISIONING_BASE}/users/current/accounts/{metaapi_account_id}/undeploy",
+        headers=_transaction_headers(),
+        poll_accepted=True,
+    )
 
 
 def remove_account(metaapi_account_id: str) -> None:
-    _request("DELETE", f"{PROVISIONING_BASE}/users/current/accounts/{metaapi_account_id}")
+    _request(
+        "DELETE",
+        f"{PROVISIONING_BASE}/users/current/accounts/{metaapi_account_id}",
+        headers=_transaction_headers(),
+        poll_accepted=True,
+    )
 
 
 def account_identifier(account: dict) -> Optional[str]:
     return account.get("id") or account.get("_id")
+
+
+def account_state(account: dict) -> Optional[str]:
+    state = account.get("state")
+    return str(state).lower() if state else None
 
 
 # ---------------------------------------------------------------------------
@@ -394,6 +464,81 @@ def get_history_orders(
     except Exception as exc:
         logger.warning("Failed to fetch history orders: %s", exc)
         return []
+
+
+def _history_payload_items(payload: object, preferred_key: str) -> list:
+    if isinstance(payload, list):
+        return payload
+    if not isinstance(payload, dict):
+        return []
+    for key in (preferred_key, "items", "historyDeals", "historyOrders"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return value
+    return []
+
+
+def _history_payload_total(payload: object) -> Optional[int]:
+    if not isinstance(payload, dict):
+        return None
+    for key in ("total", "count", "totalCount"):
+        value = payload.get(key)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def get_history_deals(
+    metaapi_account_id: str,
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
+    *,
+    position_id: Optional[str] = None,
+    limit: int = 1000,
+    max_pages: int = 20,
+) -> list:
+    """Historical deals for reconciliation, with bounded pagination."""
+    if limit <= 0:
+        raise MetaApiError("History deal page size must be positive", 400)
+    if max_pages <= 0:
+        raise MetaApiError("History deal pagination limit must be positive", 400)
+
+    if position_id:
+        base_url = (
+            f"{_client_base()}/users/current/accounts/{metaapi_account_id}"
+            f"/history-deals/position/{quote(str(position_id), safe='')}"
+        )
+    else:
+        base_url = (
+            f"{_client_base()}/users/current/accounts/{metaapi_account_id}"
+            f"/history-deals/time/{start_time or DEFAULT_HISTORY_START}/{end_time or DEFAULT_HISTORY_END}"
+        )
+
+    deals: list = []
+    offset = 0
+    for _page in range(max_pages):
+        separator = "&" if "?" in base_url else "?"
+        url = f"{base_url}{separator}offset={offset}&limit={limit}"
+        response = _request("GET", url, timeout=60.0)
+        payload = response.json()
+        page_items = _history_payload_items(payload, "deals")
+        if not page_items:
+            break
+        deals.extend(page_items)
+        total = _history_payload_total(payload)
+        if len(page_items) < limit:
+            break
+        offset += len(page_items)
+        if total is not None and offset >= total:
+            break
+    else:
+        raise MetaApiError(
+            f"MetaApi history-deals pagination exceeded {max_pages} pages",
+            504,
+        )
+    return deals
 
 
 # ---------------------------------------------------------------------------

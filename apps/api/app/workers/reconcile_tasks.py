@@ -26,7 +26,8 @@ def reconcile_broker_positions(self):
     modified SL/TP levels, and prevents marking closed during outages.
     """
     from app import models
-    from app.services.metaapi_gateway import get_positions, get_history_orders, MetaApiError
+    from app.services.metaapi_gateway import get_positions, get_history_deals, MetaApiError
+    from app.services.order_execution import summarize_closing_deals, _apply_closing_summary
 
     db = SessionLocal()
     try:
@@ -56,6 +57,7 @@ def reconcile_broker_positions(self):
             try:
                 # 1. Fetch current open positions from MetaApi for the exact account
                 positions = get_positions(account.metaapi_account_id)
+                history_deals = get_history_deals(account.metaapi_account_id)
                 
                 # Try to locate the position matching broker_position_id
                 matched_pos = None
@@ -71,41 +73,41 @@ def reconcile_broker_positions(self):
                     vol = float(matched_pos.get("volume") or 0.0)
                     
                     updated = False
-                    if sl > 0 and abs(trade.stop_loss - sl) > 1e-6:
+                    if sl > 0 and abs((trade.stop_loss or 0.0) - sl) > 1e-6:
                         trade.stop_loss = sl
                         updated = True
                     if tp > 0 and abs((trade.take_profit or 0.0) - tp) > 1e-6:
                         trade.take_profit = tp
                         updated = True
-                    if vol > 0 and abs(trade.actual_volume - vol) > 1e-6:
+                    if vol > 0 and abs((trade.actual_volume or trade.volume or 0.0) - vol) > 1e-6:
                         trade.actual_volume = vol
+                        updated = True
+
+                    closing_summary = summarize_closing_deals(history_deals, str(trade.broker_position_id))
+                    if closing_summary:
+                        _apply_closing_summary(trade, closing_summary, fully_closed=False)
                         updated = True
                     
                     if updated:
-                        trade.reconciliation_status = "modified"
+                        if trade.reconciliation_status != "partially_reconciled":
+                            trade.reconciliation_status = "modified"
                         db.add(trade)
                         db.commit()
                         logger.info("Reconciled: trade %d modified in MT5", trade.id)
                 else:
                     # Position not found in open positions — search history/deals to verify closure
-                    history_deals = get_history_orders(account.metaapi_account_id)
+                    closing_summary = summarize_closing_deals(history_deals, str(trade.broker_position_id))
+                    if not closing_summary and trade.broker_position_id:
+                        position_deals = get_history_deals(
+                            account.metaapi_account_id,
+                            position_id=str(trade.broker_position_id),
+                        )
+                        closing_summary = summarize_closing_deals(position_deals, str(trade.broker_position_id))
                     
-                    closing_deal = None
-                    for deal in history_deals:
-                        if str(deal.get("positionId") or "") == str(trade.broker_position_id) and deal.get("entryType") == "DEAL_ENTRY_OUT":
-                            closing_deal = deal
-                            break
-                    
-                    if closing_deal:
-                        trade.status = models.TradeStatus.CLOSED
-                        trade.exit_price = float(closing_deal.get("price") or trade.exit_price or 0.0)
-                        trade.exit_time = utc_now()
-                        trade.broker_profit = float(closing_deal.get("profit") or 0.0)
-                        trade.profit_loss = trade.broker_profit
-                        trade.commission = float(closing_deal.get("commission") or 0.0)
-                        trade.swap = float(closing_deal.get("swap") or 0.0)
-                        trade.reconciliation_status = "reconciled"
-                        trade.execution_status = "reconciled_closed"
+                    if closing_summary:
+                        _apply_closing_summary(trade, closing_summary, fully_closed=True)
+                        if closing_summary.volume > 0:
+                            trade.actual_volume = closing_summary.volume
                         
                         db.add(trade)
                         db.commit()

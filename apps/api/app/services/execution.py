@@ -88,6 +88,14 @@ def _looks_real_account(*values: object) -> bool:
     return "real" in joined or "live" in joined
 
 
+def _info_text(info: dict, *keys: str) -> str:
+    for key in keys:
+        value = info.get(key)
+        if value is not None:
+            return str(value)
+    return ""
+
+
 def verify_live_broker_account(account: models.BrokerAccount) -> LiveAccountVerification:
     """Verify a live account from fresh MetaApi data, not local DB account_type."""
     if not account.metaapi_account_id:
@@ -98,32 +106,33 @@ def verify_live_broker_account(account: models.BrokerAccount) -> LiveAccountVeri
     except Exception as exc:
         raise ExecutionError(f"MetaApi live-account verification failed: {exc}") from exc
 
-    state = str(remote.get("state") or account.connection_state or "").lower()
-    connection = str(remote.get("connectionStatus") or remote.get("connection_state") or "").lower()
+    state = str(remote.get("state") or "").upper()
+    connection = str(remote.get("connectionStatus") or "").upper()
     sync_state = str(
         remote.get("synchronizationStatus")
         or remote.get("synchronization_state")
         or info.get("synchronizationStatus")
         or ""
     ).lower()
-    is_real = _looks_real_account(
-        info.get("accountType"),
-        info.get("type"),
-        info.get("account_type"),
-        remote.get("accountType"),
-        remote.get("type"),
-        remote.get("name"),
+    account_trade_mode = _info_text(
+        info,
+        "type",
+        "accountType",
+        "account_type",
+        "tradeMode",
+        "trade_mode",
+        "accountTradeMode",
     )
     trade_allowed = _info_bool(info, "tradeAllowed", "trade_allowed", "tradingAllowed")
-    connected = state == "deployed" and connection == "connected"
-    synchronized = sync_state in ("synchronized", "synchronised", "connected")
+    connected = state == "DEPLOYED" and connection == "CONNECTED"
+    synchronized = True if not sync_state else sync_state in ("synchronized", "synchronised", "connected")
 
     verification = LiveAccountVerification(
         broker=str(remote.get("broker") or account.broker or "unknown"),
         server=str(remote.get("server") or account.server or "unknown"),
         masked_login=_mask_login(remote.get("login") or info.get("login") or account.account_id),
         currency=str(info.get("currency") or account.currency or "USD"),
-        is_real=is_real,
+        is_real=account_trade_mode.upper() == "ACCOUNT_TRADE_MODE_REAL",
         trade_allowed=bool(trade_allowed),
         connected=connected,
         synchronized=synchronized,
@@ -133,13 +142,13 @@ def verify_live_broker_account(account: models.BrokerAccount) -> LiveAccountVeri
 
     failures: list[str] = []
     if not verification.is_real:
-        failures.append("broker reports this is not a REAL ACCOUNT")
+        failures.append("broker account information type is not ACCOUNT_TRADE_MODE_REAL")
     if trade_allowed is not True:
         failures.append("broker tradeAllowed is not true")
-    if not verification.connected:
-        failures.append("MetaApi account is not deployed and connected")
-    if not verification.synchronized:
-        failures.append("MetaApi account is not synchronized")
+    if state != "DEPLOYED":
+        failures.append("MetaApi provisioning account state is not DEPLOYED")
+    if connection != "CONNECTED":
+        failures.append("MetaApi connectionStatus is not CONNECTED")
     if failures:
         raise ExecutionError("Live account verification failed: " + "; ".join(failures))
     return verification
@@ -416,8 +425,6 @@ def execute_signal_trade(
 
         # Backend Sizing (equity, risk_percent, prices, specs)
         risk_percent = signal.scanner_profile.risk_percent if signal.scanner_profile else user.default_risk_percent
-        if execution_mode == "live" and risk_percent > 0.25:
-            raise ExecutionError("Live order risk exceeds maximum 0.25% account risk per trade.")
         sizing = calculate_position_size(
             equity=equity,
             risk_percent=risk_percent,
@@ -429,6 +436,8 @@ def execute_signal_trade(
         )
         if sizing.blocked:
             raise ExecutionError(f"Position sizing blocked: {sizing.block_reason}")
+        actual_risk_amount = sizing.final_volume * sizing.loss_per_lot
+        effective_risk_percent = (actual_risk_amount / equity * 100.0) if equity > 0 else 0.0
 
         # Risk Engine Enforcement
         open_trade_count = db.query(models.Trade).filter(
@@ -482,6 +491,7 @@ def execute_signal_trade(
             free_margin=free_margin,
             required_margin=float(margin_result.get("requiredMargin") or 0.0),
             free_margin_after_trade=float(margin_result.get("freeMarginAfterTrade") or free_margin),
+            effective_risk_percent=effective_risk_percent,
             is_jump_in=is_jump_in,
         )
         if not risk_result.approved:
@@ -508,6 +518,9 @@ def execute_signal_trade(
             request_payload={
                 "internal_execution_uuid": internal_execution_uuid,
                 "broker_symbol": broker_symbol,
+                "requested_risk_percent": risk_percent,
+                "effective_risk_percent": effective_risk_percent,
+                "risk_amount": actual_risk_amount,
                 "account_metrics_source": "simulation" if metrics.is_simulated else "metaapi",
                 "account_margin": metrics.margin,
                 "account_balance": metrics.balance,

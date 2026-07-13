@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from dataclasses import dataclass, field
 from datetime import datetime, UTC
 from secrets import token_hex
 from typing import Optional
@@ -30,7 +31,12 @@ from app.services.execution import (
     utc_now,
     verify_live_broker_account,
 )
-from app.services.position_sizing import calculate_position_size, spec_from_metaapi_specification
+from app.services.position_sizing import (
+    SizingSpec,
+    calculate_position_size,
+    spec_from_metaapi_specification,
+    _round_down_to_step,
+)
 from app.services.risk_engine import RiskCheckResult, run_risk_checks
 from app.services import trading_control
 
@@ -44,6 +50,241 @@ redis_client = redis.Redis.from_url(settings.REDIS_URL)
 
 def _manual_client_id() -> str:
     return f"MT{token_hex(6).upper()}"
+
+
+@dataclass
+class ManualOrderPlan:
+    final_volume: float
+    raw_volume: float
+    risk_amount: float
+    effective_risk_percent: float
+    loss_per_lot: float
+    stop_loss_distance: float
+    requested_risk_percent: Optional[float] = None
+    warnings: list[str] = field(default_factory=list)
+
+
+CLOSING_DEAL_ENTRY_TYPES = {"DEAL_ENTRY_OUT", "DEAL_ENTRY_OUT_BY"}
+
+
+@dataclass
+class ClosingDealSummary:
+    deals: list[dict]
+    volume: float
+    exit_price: float
+    broker_profit: float
+    commission: float
+    swap: float
+    profit_loss: float
+    closed_at: Optional[datetime]
+
+
+def _volume_decimals(step: float) -> int:
+    step_text = f"{step:.10f}".rstrip("0")
+    return len(step_text.split(".", 1)[1]) if "." in step_text else 0
+
+
+def _validate_price_levels(
+    *,
+    direction: str,
+    entry_price: float,
+    stop_loss: float,
+    take_profit: Optional[float],
+    spec: SizingSpec,
+) -> None:
+    direction_lower = direction.lower()
+    if direction_lower not in ("buy", "sell"):
+        raise ExecutionError("Direction must be 'buy' or 'sell'.")
+    if stop_loss <= 0:
+        raise ExecutionError("Stop-loss is required for every order.")
+    if take_profit is not None and take_profit <= 0:
+        raise ExecutionError("Take-profit must be positive when provided.")
+
+    if direction_lower == "buy":
+        if stop_loss >= entry_price:
+            raise ExecutionError("BUY stop-loss must be below the entry price.")
+        if take_profit is not None and take_profit <= entry_price:
+            raise ExecutionError("BUY take-profit must be above the entry price.")
+    else:
+        if stop_loss <= entry_price:
+            raise ExecutionError("SELL stop-loss must be above the entry price.")
+        if take_profit is not None and take_profit >= entry_price:
+            raise ExecutionError("SELL take-profit must be below the entry price.")
+
+    if spec.stops_level and abs(entry_price - stop_loss) < spec.stops_level:
+        raise ExecutionError(
+            f"Stop-loss distance {abs(entry_price - stop_loss):.5f} is below broker stopsLevel {spec.stops_level:.5f}."
+        )
+    if take_profit is not None and spec.stops_level and abs(take_profit - entry_price) < spec.stops_level:
+        raise ExecutionError(
+            f"Take-profit distance {abs(take_profit - entry_price):.5f} is below broker stopsLevel {spec.stops_level:.5f}."
+        )
+
+
+def _normalize_fixed_volume(volume: float, spec: SizingSpec) -> float:
+    if spec.volume_min <= 0 or spec.volume_max <= 0 or spec.volume_step <= 0:
+        raise ExecutionError("Broker symbol specification is missing volumeMin, volumeMax, or volumeStep.")
+    normalized = _round_down_to_step(volume, spec.volume_step)
+    decimals = _volume_decimals(spec.volume_step)
+    normalized = round(normalized, decimals)
+    if normalized < spec.volume_min:
+        raise ExecutionError(
+            f"Volume {volume} normalizes to {normalized} lots, below broker minimum {spec.volume_min} lots."
+        )
+    if normalized > spec.volume_max:
+        raise ExecutionError(
+            f"Volume {normalized} lots exceeds broker maximum {spec.volume_max} lots."
+        )
+    return normalized
+
+
+def _build_manual_order_plan(
+    *,
+    metrics: BrokerAccountMetrics,
+    spec: SizingSpec,
+    direction: str,
+    observed_price: float,
+    stop_loss: float,
+    take_profit: Optional[float],
+    volume: Optional[float],
+    risk_percent: Optional[float],
+) -> ManualOrderPlan:
+    _validate_price_levels(
+        direction=direction,
+        entry_price=observed_price,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        spec=spec,
+    )
+    if metrics.equity <= 0:
+        raise ExecutionError("Account equity is zero or negative.")
+    if spec.tick_size <= 0 or spec.loss_tick_value <= 0:
+        raise ExecutionError("Broker symbol specification is missing tickSize or lossTickValue.")
+
+    stop_loss_distance = abs(observed_price - stop_loss)
+    loss_per_lot = (stop_loss_distance / spec.tick_size) * spec.loss_tick_value
+    if loss_per_lot <= 0:
+        raise ExecutionError("Loss per lot calculation yielded zero.")
+
+    warnings: list[str] = []
+    if volume is not None:
+        final_volume = _normalize_fixed_volume(float(volume), spec)
+        raw_volume = float(volume)
+        requested_risk_percent = None
+    else:
+        if risk_percent is None:
+            raise ExecutionError("Provide either fixed volume or risk percent.")
+        sizing = calculate_position_size(
+            equity=metrics.equity,
+            risk_percent=risk_percent,
+            entry_price=observed_price,
+            stop_loss=stop_loss,
+            spec=spec,
+            direction=direction,
+            platform_max_volume=settings.MAX_LIVE_ORDER_VOLUME,
+        )
+        if sizing.blocked:
+            raise ExecutionError(f"Position sizing blocked: {sizing.block_reason}")
+        final_volume = _normalize_fixed_volume(sizing.final_volume, spec)
+        raw_volume = sizing.raw_volume
+        requested_risk_percent = risk_percent
+        warnings.extend(sizing.warnings)
+
+    risk_amount = final_volume * loss_per_lot
+    effective_risk_percent = (risk_amount / metrics.equity * 100.0) if metrics.equity > 0 else 0.0
+    return ManualOrderPlan(
+        final_volume=final_volume,
+        raw_volume=raw_volume,
+        risk_amount=risk_amount,
+        effective_risk_percent=effective_risk_percent,
+        loss_per_lot=loss_per_lot,
+        stop_loss_distance=stop_loss_distance,
+        requested_risk_percent=requested_risk_percent,
+        warnings=warnings,
+    )
+
+
+def _deal_float(deal: dict, *keys: str) -> float:
+    for key in keys:
+        value = deal.get(key)
+        if value is None:
+            continue
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return 0.0
+
+
+def _deal_time(deal: dict) -> Optional[datetime]:
+    value = deal.get("time") or deal.get("brokerTime")
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(UTC).replace(tzinfo=None)
+        return parsed
+    except Exception:
+        return None
+
+
+def _deal_position_id(deal: dict) -> str:
+    return str(deal.get("positionId") or deal.get("position_id") or "")
+
+
+def _deal_entry_type(deal: dict) -> str:
+    return str(deal.get("entryType") or deal.get("entry") or "").upper()
+
+
+def summarize_closing_deals(deals: list[dict], position_id: str) -> Optional[ClosingDealSummary]:
+    closing_deals = [
+        deal for deal in deals
+        if _deal_position_id(deal) == str(position_id)
+        and _deal_entry_type(deal) in CLOSING_DEAL_ENTRY_TYPES
+    ]
+    if not closing_deals:
+        return None
+
+    total_volume = sum(_deal_float(deal, "volume", "lots") for deal in closing_deals)
+    weighted_exit = sum(
+        _deal_float(deal, "price") * _deal_float(deal, "volume", "lots")
+        for deal in closing_deals
+    )
+    broker_profit = sum(_deal_float(deal, "profit") for deal in closing_deals)
+    commission = sum(_deal_float(deal, "commission") for deal in closing_deals)
+    swap = sum(_deal_float(deal, "swap") for deal in closing_deals)
+    close_times = [value for value in (_deal_time(deal) for deal in closing_deals) if value is not None]
+    return ClosingDealSummary(
+        deals=closing_deals,
+        volume=total_volume,
+        exit_price=(weighted_exit / total_volume) if total_volume > 0 else _deal_float(closing_deals[-1], "price"),
+        broker_profit=broker_profit,
+        commission=commission,
+        swap=swap,
+        profit_loss=broker_profit + commission + swap,
+        closed_at=max(close_times) if close_times else None,
+    )
+
+
+def _apply_closing_summary(trade: models.Trade, summary: ClosingDealSummary, *, fully_closed: bool) -> None:
+    trade.exit_price = summary.exit_price or trade.exit_price
+    if summary.closed_at:
+        trade.exit_time = summary.closed_at
+        trade.closed_time = summary.closed_at
+    elif fully_closed:
+        trade.exit_time = utc_now()
+        trade.closed_time = trade.exit_time
+    trade.broker_profit = summary.broker_profit
+    trade.commission = summary.commission
+    trade.swap = summary.swap
+    trade.profit_loss = summary.profit_loss
+    if fully_closed:
+        trade.status = models.TradeStatus.CLOSED
+        trade.reconciliation_status = "reconciled"
+        trade.execution_status = "reconciled_closed"
+    else:
+        trade.reconciliation_status = "partially_reconciled"
 
 
 def _auto_renewing_lock(lock, interval: float = 8.0, timeout: float = 30.0):
@@ -113,34 +354,25 @@ def preview_manual_order(
 
     metrics = get_broker_account_metrics(account, execution_mode)
 
-    # Sizing
-    rp = risk_percent or user.default_risk_percent
-    if volume:
-        final_volume = volume
-        risk_amount = abs(observed_price - stop_loss) * volume * (spec.loss_tick_value / spec.tick_size if spec.tick_size else 1)
-    else:
-        sizing = calculate_position_size(
-            equity=metrics.equity,
-            risk_percent=rp,
-            entry_price=observed_price,
-            stop_loss=stop_loss,
-            spec=spec,
-            direction=direction,
-            platform_max_volume=settings.MAX_LIVE_ORDER_VOLUME,
-        )
-        if sizing.blocked:
-            raise ExecutionError(f"Position sizing blocked: {sizing.block_reason}")
-        final_volume = sizing.final_volume
-        risk_amount = sizing.risk_amount
+    plan = _build_manual_order_plan(
+        metrics=metrics,
+        spec=spec,
+        direction=direction,
+        observed_price=observed_price,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        volume=volume,
+        risk_percent=risk_percent,
+    )
 
     # Margin
     margin_result = {"requiredMargin": 0.0}
     try:
         margin_result = metaapi.calculate_margin(
-            account.metaapi_account_id, broker_symbol, direction, final_volume, observed_price,
+            account.metaapi_account_id, broker_symbol, direction, plan.final_volume, observed_price,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        raise ExecutionError(f"Broker margin calculation failed: {exc}") from exc
     required_margin = float(margin_result.get("requiredMargin") or 0.0)
     free_margin_after = metrics.free_margin - required_margin
 
@@ -169,12 +401,13 @@ def preview_manual_order(
 
     risk_result = run_risk_checks(
         db=db, user=user, account=account, observed_price=observed_price,
-        volume=final_volume, execution_mode=execution_mode, quote=quote,
+        volume=plan.final_volume, execution_mode=execution_mode, quote=quote,
         stop_loss=stop_loss, quote_time_str=quote_time_str,
         open_trade_count=open_trade_count, daily_realized_pnl=daily_loss,
         equity=metrics.equity, free_margin=metrics.free_margin,
         required_margin=required_margin,
         free_margin_after_trade=free_margin_after,
+        effective_risk_percent=plan.effective_risk_percent,
     )
     if not risk_result.approved:
         risk_warnings = risk_result.reasons
@@ -188,8 +421,9 @@ def preview_manual_order(
         "observed_price": observed_price,
         "stop_loss": stop_loss,
         "take_profit": take_profit,
-        "calculated_volume": final_volume,
-        "risk_amount": round(risk_amount, 2),
+        "calculated_volume": plan.final_volume,
+        "risk_amount": round(plan.risk_amount, 2),
+        "effective_risk_percent": round(plan.effective_risk_percent, 4),
         "required_margin": round(required_margin, 2),
         "free_margin_after": round(free_margin_after, 2),
         "equity": round(metrics.equity, 2),
@@ -275,26 +509,22 @@ def execute_manual_order(
 
         metrics = get_broker_account_metrics(account, execution_mode)
 
-        # Sizing
-        rp = risk_percent or user.default_risk_percent
-        if volume:
-            final_volume = volume
-        else:
-            sizing = calculate_position_size(
-                equity=metrics.equity, risk_percent=rp,
-                entry_price=observed_price, stop_loss=stop_loss,
-                spec=spec, direction=direction,
-                platform_max_volume=settings.MAX_LIVE_ORDER_VOLUME,
-            )
-            if sizing.blocked:
-                raise ExecutionError(f"Position sizing blocked: {sizing.block_reason}")
-            final_volume = sizing.final_volume
+        plan = _build_manual_order_plan(
+            metrics=metrics,
+            spec=spec,
+            direction=direction,
+            observed_price=observed_price,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            volume=volume,
+            risk_percent=risk_percent,
+        )
 
         # Margin
         margin_result = {"requiredMargin": 0.0, "freeMarginAfterTrade": metrics.free_margin}
         try:
             margin_result = metaapi.calculate_margin(
-                account.metaapi_account_id, broker_symbol, direction, final_volume, observed_price,
+                account.metaapi_account_id, broker_symbol, direction, plan.final_volume, observed_price,
             )
         except Exception as exc:
             raise ExecutionError(f"Broker margin calculation failed: {exc}") from exc
@@ -312,12 +542,13 @@ def execute_manual_order(
 
         risk_result = run_risk_checks(
             db=db, user=user, account=account, observed_price=observed_price,
-            volume=final_volume, execution_mode=execution_mode, quote=quote,
+            volume=plan.final_volume, execution_mode=execution_mode, quote=quote,
             stop_loss=stop_loss, quote_time_str=quote_time_str,
             open_trade_count=open_trade_count, daily_realized_pnl=daily_loss,
             equity=metrics.equity, free_margin=metrics.free_margin,
             required_margin=required_margin,
             free_margin_after_trade=free_margin_after,
+            effective_risk_percent=plan.effective_risk_percent,
         )
         if not risk_result.approved:
             raise ExecutionError(f"Risk engine rejected: {'; '.join(risk_result.reasons)}")
@@ -331,18 +562,24 @@ def execute_manual_order(
             execution_mode=execution_mode,
             idempotency_key=idempotency_key,
             client_order_id=client_order_id,
-            requested_volume=final_volume,
+            requested_volume=plan.final_volume,
             requested_price=observed_price,
             equity_at_time=metrics.equity,
-            risk_percent_at_time=rp,
+            risk_percent_at_time=plan.effective_risk_percent,
             tick_size_at_time=spec.tick_size,
             tick_value_at_time=spec.loss_tick_value,
+            stop_loss_distance=plan.stop_loss_distance,
+            loss_per_lot=plan.loss_per_lot,
+            raw_volume=plan.raw_volume,
             request_payload={
                 "manual_order": True,
                 "broker_symbol": broker_symbol,
                 "direction": direction,
                 "stop_loss": stop_loss,
                 "take_profit": take_profit,
+                "requested_risk_percent": plan.requested_risk_percent,
+                "effective_risk_percent": plan.effective_risk_percent,
+                "risk_amount": plan.risk_amount,
             },
             status="CREATED",
         )
@@ -361,7 +598,7 @@ def execute_manual_order(
                 metaapi_account_id=account.metaapi_account_id,
                 symbol=broker_symbol,
                 direction=direction,
-                volume=final_volume,
+                volume=plan.final_volume,
                 stop_loss=stop_loss,
                 take_profit=take_profit,
                 client_id=client_order_id,
@@ -406,7 +643,7 @@ def execute_manual_order(
                 entry_time=utc_now(),
                 stop_loss=stop_loss,
                 take_profit=take_profit,
-                volume=final_volume,
+                volume=plan.final_volume,
                 status=models.TradeStatus.OPEN,
                 mode=models.TradingMode.LIVE if execution_mode == "live" else models.TradingMode.DEMO,
                 execution_mode=execution_mode,
@@ -418,8 +655,8 @@ def execute_manual_order(
                 broker_deal_id=intent.broker_deal_id,
                 requested_price=observed_price,
                 actual_fill_price=fill_price,
-                requested_volume=final_volume,
-                actual_volume=final_volume,
+                requested_volume=plan.final_volume,
+                actual_volume=plan.final_volume,
                 opened_time=utc_now(),
                 reconciliation_status="pending",
                 execution_status="filled",
@@ -461,7 +698,7 @@ def execute_manual_order(
                         entry_time=utc_now(),
                         stop_loss=stop_loss,
                         take_profit=take_profit,
-                        volume=final_volume,
+                        volume=plan.final_volume,
                         status=models.TradeStatus.OPEN,
                         mode=models.TradingMode.LIVE if execution_mode == "live" else models.TradingMode.DEMO,
                         execution_mode=execution_mode,
@@ -473,8 +710,8 @@ def execute_manual_order(
                         broker_deal_id=intent.broker_deal_id,
                         requested_price=observed_price,
                         actual_fill_price=observed_price,
-                        requested_volume=final_volume,
-                        actual_volume=final_volume,
+                        requested_volume=plan.final_volume,
+                        actual_volume=plan.final_volume,
                         opened_time=utc_now(),
                         reconciliation_status="pending",
                         execution_status="filled",
@@ -525,7 +762,7 @@ def reconcile_account(account_id: int, user_id: int, db: Session) -> dict:
 
     try:
         positions = metaapi.get_positions(account.metaapi_account_id)
-        history_deals = metaapi.get_history_orders(account.metaapi_account_id)
+        history_deals = metaapi.get_history_deals(account.metaapi_account_id)
 
         for trade in trades:
             # Try to match open position
@@ -541,38 +778,40 @@ def reconcile_account(account_id: int, user_id: int, db: Session) -> dict:
                 vol = float(matched_pos.get("volume") or 0.0)
                 
                 updated = False
-                if sl > 0 and abs(trade.stop_loss - sl) > 1e-6:
+                if sl > 0 and abs((trade.stop_loss or 0.0) - sl) > 1e-6:
                     trade.stop_loss = sl
                     updated = True
                 if tp > 0 and abs((trade.take_profit or 0.0) - tp) > 1e-6:
                     trade.take_profit = tp
                     updated = True
-                if vol > 0 and abs(trade.actual_volume - vol) > 1e-6:
+                if vol > 0 and abs((trade.actual_volume or trade.volume or 0.0) - vol) > 1e-6:
                     trade.actual_volume = vol
+                    updated = True
+
+                closing_summary = summarize_closing_deals(history_deals, str(trade.broker_position_id))
+                if closing_summary:
+                    _apply_closing_summary(trade, closing_summary, fully_closed=False)
                     updated = True
                 
                 if updated:
-                    trade.reconciliation_status = "modified"
+                    if trade.reconciliation_status != "partially_reconciled":
+                        trade.reconciliation_status = "modified"
                     db.add(trade)
                     modified_count += 1
             else:
                 # Search historical deals
-                closing_deal = None
-                for deal in history_deals:
-                    if str(deal.get("positionId") or "") == str(trade.broker_position_id) and deal.get("entryType") == "DEAL_ENTRY_OUT":
-                        closing_deal = deal
-                        break
+                closing_summary = summarize_closing_deals(history_deals, str(trade.broker_position_id))
+                if not closing_summary and trade.broker_position_id:
+                    position_deals = metaapi.get_history_deals(
+                        account.metaapi_account_id,
+                        position_id=str(trade.broker_position_id),
+                    )
+                    closing_summary = summarize_closing_deals(position_deals, str(trade.broker_position_id))
 
-                if closing_deal:
-                    trade.status = models.TradeStatus.CLOSED
-                    trade.exit_price = float(closing_deal.get("price") or trade.exit_price or 0.0)
-                    trade.exit_time = utc_now()
-                    trade.broker_profit = float(closing_deal.get("profit") or 0.0)
-                    trade.profit_loss = trade.broker_profit
-                    trade.commission = float(closing_deal.get("commission") or 0.0)
-                    trade.swap = float(closing_deal.get("swap") or 0.0)
-                    trade.reconciliation_status = "reconciled"
-                    trade.execution_status = "reconciled_closed"
+                if closing_summary:
+                    _apply_closing_summary(trade, closing_summary, fully_closed=True)
+                    if closing_summary.volume > 0:
+                        trade.actual_volume = closing_summary.volume
                     db.add(trade)
                     reconciled_count += 1
                 else:

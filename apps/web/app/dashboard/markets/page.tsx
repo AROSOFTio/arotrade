@@ -39,11 +39,36 @@ type Sotd = {
   take_profit_1?: number | null
   reasoning: string[]
 }
+type ManualOrderPreview = {
+  broker_symbol: string
+  direction: string
+  bid: number
+  ask: number
+  spread: number
+  observed_price: number
+  stop_loss: number
+  take_profit?: number | null
+  calculated_volume: number
+  volume?: number
+  risk_amount: number
+  effective_risk_percent: number
+  required_margin: number
+  free_margin_after: number
+  equity: number
+  balance: number
+  account_currency: string
+  quote_time?: string | null
+  quote_age_seconds?: number | null
+  stale_data_warning: boolean
+  risk_warnings: string[]
+}
 
 const timeframes = ['M5', 'M15', 'M30', 'H1', 'H4', 'D1']
 const NEWS_REFRESH_MS = 2 * 60_000
 const AI_REFRESH_MS = 5 * 60_000
 const updateTime = (date: Date | null) => date ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'pending'
+const parsedMaxLiveRiskPercent = Number(process.env.NEXT_PUBLIC_MAX_LIVE_RISK_PERCENT || '0.25')
+const maxLiveRiskPercent = Number.isFinite(parsedMaxLiveRiskPercent) && parsedMaxLiveRiskPercent > 0 ? parsedMaxLiveRiskPercent : 0.25
 
 export default function MarketsPage() {
   const [accounts, setAccounts] = useState<BrokerAccount[]>([])
@@ -70,10 +95,10 @@ export default function MarketsPage() {
   const [tradeDirection, setTradeDirection] = useState<'buy' | 'sell'>('buy')
   const [sizingMode, setSizingMode] = useState<'fixed' | 'risk'>('fixed')
   const [volumeInput, setVolumeInput] = useState('0.1')
-  const [riskPercentInput, setRiskPercentInput] = useState('1.0')
+  const [riskPercentInput, setRiskPercentInput] = useState(String(maxLiveRiskPercent))
   const [slInput, setSlInput] = useState('')
   const [tpInput, setTpInput] = useState('')
-  const [previewData, setPreviewData] = useState<any>(null)
+  const [previewData, setPreviewData] = useState<ManualOrderPreview | null>(null)
   const [previewError, setPreviewError] = useState('')
   const [previewLoading, setPreviewLoading] = useState(false)
   const [executionLoading, setExecutionLoading] = useState(false)
@@ -357,6 +382,7 @@ export default function MarketsPage() {
     setPreviewLoading(true)
     setPreviewError('')
     setPreviewData(null)
+    setShowConfirmModal(false)
     try {
       const body: any = {
         broker_account_id: selectedAccountId,
@@ -373,7 +399,7 @@ export default function MarketsPage() {
         body.risk_percent = parseFloat(riskPercentInput)
       }
 
-      const res = await apiRequest<any>('/orders/preview', {
+      const res = await apiRequest<ManualOrderPreview>('/orders/preview', {
         method: 'POST',
         body: JSON.stringify(body)
       })
@@ -387,6 +413,11 @@ export default function MarketsPage() {
 
   const handleExecute = async () => {
     if (!selectedAccountId || !selectedSymbol || !slInput) return
+    if ((previewData?.risk_warnings?.length || 0) > 0) {
+      setError('Execution blocked by preview risk warnings.')
+      setShowConfirmModal(false)
+      return
+    }
     setExecutionLoading(true)
     setExecutionSuccess('')
     setError('')
@@ -423,6 +454,8 @@ export default function MarketsPage() {
   }
 
   const selectedAccount = accounts.find(a => a.id === selectedAccountId)
+  const previewRiskWarnings = previewData?.risk_warnings ?? []
+  const previewHasBlockingRisk = previewRiskWarnings.length > 0
 
   if (accountsLoading) {
     return (
@@ -655,7 +688,7 @@ export default function MarketsPage() {
                       type="number"
                       step="0.1"
                       min="0.1"
-                      max="10"
+                      max={maxLiveRiskPercent}
                       className="input-base mt-1 w-full text-sm"
                       value={riskPercentInput}
                       onChange={(e) => setRiskPercentInput(e.target.value)}
@@ -722,9 +755,9 @@ export default function MarketsPage() {
                   {previewData.required_margin != null && <><dt className="text-slate-500">Margin Required</dt><dd className="font-semibold text-slate-900 tabular-nums text-right">${previewData.required_margin?.toFixed(2)}</dd></>}
                   {previewData.free_margin_after != null && <><dt className="text-slate-500">Free Margin After</dt><dd className="font-semibold text-slate-900 tabular-nums text-right">${previewData.free_margin_after?.toFixed(2)}</dd></>}
                 </dl>
-                {previewData.warnings && previewData.warnings.length > 0 && (
+                {previewRiskWarnings.length > 0 && (
                   <div className="mt-2 rounded border border-amber-200 bg-amber-50 px-2 py-1.5">
-                    {previewData.warnings.map((w: string, i: number) => (
+                    {previewRiskWarnings.map((w: string, i: number) => (
                       <p key={i} className="text-[11px] text-amber-700">⚠ {w}</p>
                     ))}
                   </div>
@@ -734,9 +767,14 @@ export default function MarketsPage() {
                 {!showConfirmModal ? (
                   <button
                     type="button"
-                    onClick={() => setShowConfirmModal(true)}
+                    disabled={previewHasBlockingRisk}
+                    onClick={() => {
+                      if (!previewHasBlockingRisk) setShowConfirmModal(true)
+                    }}
                     className={`mt-3 w-full rounded-lg py-2.5 text-xs font-bold uppercase tracking-wide text-white transition-all ${
-                      tradeDirection === 'buy'
+                      previewHasBlockingRisk
+                        ? 'bg-slate-300 text-slate-500 shadow-none'
+                        : tradeDirection === 'buy'
                         ? 'bg-[#15803d] hover:bg-[#166534] shadow-md shadow-green-200'
                         : 'bg-[#b91c1c] hover:bg-[#991b1b] shadow-md shadow-red-200'
                     }`}
@@ -761,10 +799,10 @@ export default function MarketsPage() {
                       </button>
                       <button
                         type="button"
-                        disabled={executionLoading}
+                        disabled={executionLoading || previewHasBlockingRisk}
                         onClick={() => void handleExecute()}
                         className={`rounded-lg py-1.5 text-xs font-bold text-white ${
-                          tradeDirection === 'buy' ? 'bg-[#15803d]' : 'bg-[#b91c1c]'
+                          previewHasBlockingRisk ? 'bg-slate-300 text-slate-500' : tradeDirection === 'buy' ? 'bg-[#15803d]' : 'bg-[#b91c1c]'
                         }`}
                       >
                         {executionLoading ? 'Sending…' : 'Confirm'}

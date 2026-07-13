@@ -36,10 +36,19 @@ def _metaapi_error(exc: metaapi.MetaApiError) -> HTTPException:
 def _apply_remote_state(account: models.BrokerAccount, remote: dict) -> bool:
     """Copy MetaApi deployment state onto our local broker account row."""
     previous_state = account.connection_state
-    state = (remote.get("state") or "").lower()
+    state = metaapi.account_state(remote)
     if state:
-        account.connection_state = "deployed" if state == "deployed" else state
+        account.connection_state = state
     return account.connection_state != previous_state
+
+
+def _remote_requires_deployment(remote: dict) -> bool:
+    state = metaapi.account_state(remote)
+    if state in {"deployed", "deploying"}:
+        return False
+    if state in {"created", "undeployed", "undeploying"}:
+        return True
+    return True
 
 
 @router.get("", response_model=list[schemas.BrokerAccountResponse])
@@ -59,7 +68,7 @@ async def list_broker_accounts(
             remote = metaapi.get_account(account.metaapi_account_id)
         except metaapi.MetaApiError:
             continue
-        state = (remote.get("state") or "").lower()
+    state = metaapi.account_state(remote) or ""
         connection = (remote.get("connectionStatus") or "").lower()
         has_updates = _apply_remote_state(account, remote) or has_updates
         if state == "deployed" and connection == "connected":
@@ -156,7 +165,7 @@ async def connect_mt5_account(
         server=payload.server.strip(),
         platform=payload.platform,
         metaapi_account_id=metaapi_account_id,
-        connection_state="undeployed",
+        connection_state=metaapi.account_state(created) or "undeployed",
     )
     db.add(account)
     create_notification(
@@ -181,10 +190,14 @@ async def deploy_account(
     account = _get_user_account(account_id, current_user["user_id"], db)
     metaapi_id = _require_metaapi(account)
     try:
-        metaapi.deploy_account(metaapi_id)
+        remote = metaapi.get_account(metaapi_id)
+        _apply_remote_state(account, remote)
+        if _remote_requires_deployment(remote):
+            metaapi.deploy_account(metaapi_id)
+            remote = metaapi.get_account(metaapi_id)
+            _apply_remote_state(account, remote)
     except metaapi.MetaApiError as exc:
         raise _metaapi_error(exc)
-    account.connection_state = "deploying"
     db.commit()
     db.refresh(account)
     return account
@@ -223,7 +236,7 @@ async def refresh_account_state(
     except metaapi.MetaApiError as exc:
         raise _metaapi_error(exc)
 
-    state = (remote.get("state") or "").lower()          # CREATED/DEPLOYING/DEPLOYED/UNDEPLOYING/UNDEPLOYED
+    state = metaapi.account_state(remote) or ""          # created/deploying/deployed/undeploying/undeployed
     connection = (remote.get("connectionStatus") or "").lower()  # connected/disconnected/connecting
     _apply_remote_state(account, remote)
 

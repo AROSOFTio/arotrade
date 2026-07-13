@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     METAAPI_TOKEN: str = ""
     METAAPI_REGION: str = "london"
     MAX_LIVE_ORDER_VOLUME: float = 1.0
+    MAX_LIVE_RISK_PERCENT: float = 0.25
 
     # Email (optional - notifications are skipped if SMTP_HOST is empty)
     SMTP_HOST: str = ""

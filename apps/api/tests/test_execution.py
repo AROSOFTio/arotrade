@@ -12,6 +12,7 @@ config_module.settings = SimpleNamespace(
     MIN_SIGNAL_RISK_REWARD=1.5,
     REDIS_URL="redis://localhost:6379/0",
     MAX_LIVE_ORDER_VOLUME=1.0,
+    MAX_LIVE_RISK_PERCENT=0.25,
     QUOTE_STALE_AFTER_SECONDS=10.0,
     PAPER_TRADING_ENABLED=True,
     DEMO_INITIAL_BALANCE=10000.0,
@@ -21,7 +22,7 @@ config_module.settings = SimpleNamespace(
 config_module.DATABASE_URL = "sqlite:///:memory:"
 sys.modules.setdefault("app.config", config_module)
 
-from app.services.execution import evaluate_signal_for_execution, utc_now, execute_signal_trade
+from app.services.execution import evaluate_signal_for_execution, utc_now, execute_signal_trade, verify_live_broker_account
 from app import models
 
 
@@ -51,6 +52,37 @@ def active_user(**overrides):
 
 
 class SignalExecutionGateTests(unittest.TestCase):
+    @patch("app.services.execution.metaapi")
+    def test_live_verification_accepts_rest_response_without_sync_status(self, mock_meta):
+        mock_meta.get_account.return_value = {
+            "id": "acct-1",
+            "state": "DEPLOYED",
+            "connectionStatus": "CONNECTED",
+            "broker": "Exness",
+            "server": "Exness-MT5",
+            "login": "12345678",
+        }
+        mock_meta.get_account_information.return_value = {
+            "tradeAllowed": True,
+            "type": "ACCOUNT_TRADE_MODE_REAL",
+            "currency": "USD",
+        }
+        account = SimpleNamespace(
+            metaapi_account_id="acct-1",
+            connection_state="deployed",
+            broker="exness",
+            server="Exness-MT5",
+            account_id="12345678",
+            currency="USD",
+        )
+
+        result = verify_live_broker_account(account)
+
+        self.assertTrue(result.connected)
+        self.assertTrue(result.synchronized)
+        self.assertTrue(result.is_real)
+        self.assertTrue(result.trade_allowed)
+
     def test_approved_signal_with_valid_price_is_eligible(self):
         result = evaluate_signal_for_execution(
             approved_buy_signal(), active_user(), open_trade_count=0, observed_price=100.0

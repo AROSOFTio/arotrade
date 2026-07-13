@@ -224,7 +224,7 @@ async def preview_execution(
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Failed to fetch quote/specs: {exc}")
 
-    spec = spec_from_metaapi_specification(spec_dict)
+    spec = spec_from_metaapi_specification(spec_dict, quote)
     if not spec:
         raise HTTPException(status_code=400, detail="Incomplete symbol specifications")
 
@@ -242,6 +242,8 @@ async def preview_execution(
         direction=signal.signal_type,
         platform_max_volume=settings.MAX_LIVE_ORDER_VOLUME
     )
+    actual_risk_amount = sizing.final_volume * sizing.loss_per_lot if not sizing.blocked else 0.0
+    effective_risk_percent = (actual_risk_amount / metrics.equity * 100.0) if metrics.equity > 0 else 0.0
 
     # Risk Engine
     open_trade_count = db.query(models.Trade).filter(
@@ -266,6 +268,7 @@ async def preview_execution(
         daily_realized_pnl=daily_loss,
         equity=metrics.equity,
         free_margin=metrics.free_margin,
+        effective_risk_percent=effective_risk_percent,
         is_jump_in=True,
     )
 
@@ -285,7 +288,8 @@ async def preview_execution(
         "bid": quote.get("bid") or quote.get("brokerBid"),
         "ask": quote.get("ask") or quote.get("brokerAsk"),
         "spread": quote.get("spread") or 0.0,
-        "risk_amount": sizing.risk_amount,
+        "risk_amount": actual_risk_amount,
+        "effective_risk_percent": effective_risk_percent,
         "loss_per_lot": sizing.loss_per_lot,
     }
 

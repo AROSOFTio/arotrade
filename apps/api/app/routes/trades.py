@@ -14,7 +14,7 @@ async def execute_trade(
     current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Reject direct execution until the signal-to-broker path is configured."""
+    """Deprecated direct execution route. Use /api/orders/execute."""
     # Get user
     user = db.query(models.User).filter(models.User.id == current_user["user_id"]).first()
 
@@ -22,8 +22,8 @@ async def execute_trade(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     raise HTTPException(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail="Direct execution is disabled. Use an approved signal and the paper execution endpoint. No live broker adapter is configured."
+        status_code=status.HTTP_410_GONE,
+        detail="Deprecated endpoint. Use POST /api/orders/execute for MetaApi manual orders."
     )
 
 

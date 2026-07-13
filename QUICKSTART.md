@@ -340,7 +340,7 @@ Full guides available in `docs/`:
 
 **Phase 2 (Week 2-3):**
 - OpenAI/Groq/Claude integration
-- MetaApi MT5 bridge
+- MetaApi MT4/MT5 broker execution gateway
 - OANDA integration
 - Advanced backtesting statistics
 
