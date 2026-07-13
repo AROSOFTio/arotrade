@@ -141,7 +141,12 @@ export default function SignalsPage() {
     try {
       const response = await apiRequest<Signal[]>('/signals')
       setSignals(response)
-      setSelectedId((current) => current ?? response[0]?.id ?? null)
+      setSelectedId((current) => {
+        if (current) return current
+        const savedId = Number(window.localStorage.getItem('arotrade:selected_signal_id') || '')
+        window.localStorage.removeItem('arotrade:selected_signal_id')
+        return response.some((signal) => signal.id === savedId) ? savedId : response[0]?.id ?? null
+      })
     } catch (requestError) {
       setError(errorMessage(requestError))
     } finally {
