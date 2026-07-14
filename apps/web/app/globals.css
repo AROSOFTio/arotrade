@@ -3,9 +3,9 @@
 @tailwind utilities;
 
 :root {
-  --brand: #2563eb;
-  --brand-dark: #1d4ed8;
-  --brand-soft: #eff6ff;
+  --brand: #20b955;
+  --brand-dark: #159947;
+  --brand-soft: #f0fdf4;
   --app-bg: #f6f7f9;
   --surface: #ffffff;
   --surface-subtle: #f8fafc;
@@ -110,6 +110,44 @@ textarea:focus-visible {
   background: #687176;
 }
 
+
+/* aaPanel green theme: remap legacy blue utility classes in light and dark mode. */
+.bg-blue-50 { background-color: #f0fdf4; }
+.bg-blue-50\/30 { background-color: rgba(240, 253, 244, 0.72); }
+.bg-blue-50\/50 { background-color: rgba(240, 253, 244, 0.78); }
+.bg-blue-50\/60 { background-color: rgba(240, 253, 244, 0.84); }
+.bg-blue-100 { background-color: #dcfce7; }
+.text-blue-100 { color: #dcfce7; }
+.text-blue-300,
+.text-blue-400,
+.text-blue-500,
+.text-blue-600,
+.text-blue-700,
+.text-\[\#2563eb\],
+.text-\[\#1d4ed8\],
+.hover\:text-\[\#1d4ed8\]:hover,
+.hover\:text-\[\#2563eb\]:hover { color: var(--brand); }
+.border-blue-100,
+.border-blue-200,
+.border-blue-300,
+.border-blue-400,
+.border-blue-500,
+.border-blue-600,
+.border-\[\#bfdbfe\] { border-color: #bbf7d0; }
+.bg-\[\#eff6ff\] { background-color: #f0fdf4; }
+.bg-\[\#2563eb\],
+.bg-blue-500,
+.bg-blue-600,
+.checked\:bg-\[\#2563eb\]:checked { background-color: var(--brand); }
+.hover\:bg-\[\#1d4ed8\]:hover { background-color: var(--brand-dark); }
+.hover\:bg-blue-50:hover { background-color: #dcfce7; }
+.hover\:border-blue-300:hover { border-color: #86efac; }
+.focus\:border-\[\#2563eb\]:focus { border-color: var(--brand); }
+.focus\:ring-blue-100:focus { --tw-ring-color: rgba(32, 185, 85, 0.22); }
+.accent-blue-500,
+.accent-\[\#2563eb\] { accent-color: var(--brand); }
+.from-blue-100 { --tw-gradient-from: #dcfce7 var(--tw-gradient-from-position); --tw-gradient-to: rgb(220 252 231 / 0) var(--tw-gradient-to-position); --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to); }
+.to-blue-50 { --tw-gradient-to: #f0fdf4 var(--tw-gradient-to-position); }
 /* ============================================================
    Dark theme — token remap for the utility palette used app-wide.
    Every color utility the app uses gets a deliberate dark value;
@@ -195,7 +233,7 @@ textarea:focus-visible {
 
 @layer components {
   .btn-primary {
-    @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-[#2563eb] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#1d4ed8] disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-[#20b955] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#159947] disabled:cursor-not-allowed disabled:opacity-50;
   }
 
   .btn-secondary {
@@ -215,7 +253,7 @@ textarea:focus-visible {
   }
 
   .input-base {
-    @apply min-h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-[#2563eb] focus:outline-none focus:ring-2 focus:ring-blue-100;
+    @apply min-h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-[#20b955] focus:outline-none focus:ring-2 focus:ring-green-100;
   }
 
   .label {

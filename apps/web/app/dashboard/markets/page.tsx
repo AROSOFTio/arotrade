@@ -552,8 +552,8 @@ export default function MarketsPage() {
     return (
       <>
         <PageHeader eyebrow="Live data" title="Markets" description="Real-time charts and prices." />
-        <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-6 text-center">
-          <Landmark size={32} className="mx-auto text-blue-500" />
+        <div className="rounded-lg border border-[#bbf7d0] bg-[#f0fdf4] p-6 text-center">
+          <Landmark size={32} className="mx-auto text-[#15803d]" />
           <h2 className="mt-3 text-sm font-semibold text-slate-900">No active broker accounts connected</h2>
           <p className="mt-1 text-xs text-slate-500">You must connect and deploy an active MT5 broker account to load real-time market data.</p>
           <div className="mt-4">
@@ -592,7 +592,7 @@ export default function MarketsPage() {
         {selectedAccount && (
           <div className="flex flex-wrap items-center gap-2">
             <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-              selectedAccount.account_type === 'live' ? 'bg-[#f0fdf4] text-[#166534] border border-[#bbf7d0]' : 'bg-[#eff6ff] text-[#1e40af] border border-[#bfdbfe]'
+              selectedAccount.account_type === 'live' ? 'bg-[#f0fdf4] text-[#166534] border border-[#bbf7d0]' : 'bg-[#f0fdf4] text-[#15803d] border border-[#bbf7d0]'
             }`}>
               {selectedAccount.account_type === 'live' ? 'LIVE MT5' : 'DEMO MT5'}
             </span>
@@ -629,7 +629,7 @@ export default function MarketsPage() {
                     type="button"
                     onClick={() => setTimeframe(tf)}
                     className={`min-h-8 rounded px-2.5 text-xs font-semibold ${
-                      timeframe === tf ? 'bg-blue-50 text-[#1d4ed8]' : 'text-slate-500 hover:text-slate-900'
+                      timeframe === tf ? 'bg-[#f0fdf4] text-[#15803d]' : 'text-slate-500 hover:text-slate-900'
                     }`}
                   >
                     {tf}
@@ -663,18 +663,18 @@ export default function MarketsPage() {
           {/* ── Manual Trade Ticket ── */}
           <div className={`card border-2 ${
             selectedAccount?.account_type === 'live'
-              ? 'border-amber-400/70 bg-gradient-to-b from-amber-50/40 to-white'
-              : 'border-blue-300/60 bg-gradient-to-b from-blue-50/30 to-white'
+              ? 'border-amber-300 bg-white'
+              : 'border-[#bbf7d0] bg-white'
           }`}>
             <div className="flex items-center justify-between gap-2">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <ArrowUpDown size={15} className="text-[#2563eb]" aria-hidden="true" />
+                <ArrowUpDown size={15} className="text-[#15803d]" aria-hidden="true" />
                 Trade Ticket
               </h2>
               <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
                 selectedAccount?.account_type === 'live'
                   ? 'bg-red-100 text-red-700 border border-red-200'
-                  : 'bg-blue-100 text-blue-700 border border-blue-200'
+                  : 'bg-[#f0fdf4] text-[#15803d] border border-[#bbf7d0]'
               }`}>
                 {selectedAccount?.account_type === 'live' ? '🔴 LIVE ORDER' : 'DEMO'}
               </span>
@@ -764,7 +764,7 @@ export default function MarketsPage() {
                   type="button"
                   onClick={() => setSizingMode('fixed')}
                   className={`flex-1 rounded px-2 py-1 text-[11px] font-semibold transition-colors ${
-                    sizingMode === 'fixed' ? 'bg-blue-50 text-[#1d4ed8]' : 'text-slate-500 hover:text-slate-800'
+                    sizingMode === 'fixed' ? 'bg-[#f0fdf4] text-[#15803d]' : 'text-slate-500 hover:text-slate-800'
                   }`}
                 >
                   Fixed Volume
@@ -773,7 +773,7 @@ export default function MarketsPage() {
                   type="button"
                   onClick={() => setSizingMode('risk')}
                   className={`flex-1 rounded px-2 py-1 text-[11px] font-semibold transition-colors ${
-                    sizingMode === 'risk' ? 'bg-blue-50 text-[#1d4ed8]' : 'text-slate-500 hover:text-slate-800'
+                    sizingMode === 'risk' ? 'bg-[#f0fdf4] text-[#15803d]' : 'text-slate-500 hover:text-slate-800'
                   }`}
                 >
                   Risk % Sizing
@@ -852,8 +852,8 @@ export default function MarketsPage() {
 
             {/* Preview Results */}
             {previewData && (
-              <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50/50 p-3">
-                <p className="text-[11px] font-bold uppercase text-blue-700 mb-2">Order Preview</p>
+              <div className="mt-3 rounded-lg border border-[#bbf7d0] bg-[#f0fdf4] p-3">
+                <p className="text-[11px] font-bold uppercase text-[#15803d] mb-2">Order Preview</p>
                 <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
                   <dt className="text-slate-500">Direction</dt>
                   <dd className="font-semibold text-slate-900 text-right">{previewData.direction?.toUpperCase()}</dd>
@@ -988,7 +988,7 @@ export default function MarketsPage() {
           <div className="card">
             <div className="flex items-center justify-between gap-3">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <Sparkles size={15} className="text-[#2563eb]" aria-hidden="true" /> Signal of the day
+                <Sparkles size={15} className="text-[#15803d]" aria-hidden="true" /> Signal of the day
               </h2>
               <button
                 type="button"
@@ -1044,7 +1044,7 @@ export default function MarketsPage() {
           <div className="card">
             <div className="flex items-center justify-between gap-3">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <CalendarClock size={15} className="text-[#2563eb]" aria-hidden="true" /> News IQ · {selectedSymbol?.canonical_symbol}
+                <CalendarClock size={15} className="text-[#15803d]" aria-hidden="true" /> News IQ · {selectedSymbol?.canonical_symbol}
               </h2>
               <button
                 type="button"
@@ -1059,7 +1059,7 @@ export default function MarketsPage() {
               Last news: {updateTime(newsUpdatedAt)}. Last AI: {updateTime(impactUpdatedAt)}.
             </p>
             {impact && (
-              <div className="mt-3 rounded-md border border-blue-100 bg-blue-50/60 px-3 py-3">
+              <div className="mt-3 rounded-md border border-[#bbf7d0] bg-[#f0fdf4] px-3 py-3">
                 <p className="text-xs leading-5 text-slate-700">{impact.summary}</p>
               </div>
             )}
