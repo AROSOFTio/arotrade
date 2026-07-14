@@ -210,6 +210,8 @@ services:
 
   # Caddy Proxy
   caddy:
+    profiles:
+      - local-proxy
     image: caddy:2-alpine
     container_name: arotrade-proxy
     ports:
