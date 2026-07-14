@@ -46,6 +46,18 @@ class Settings(BaseSettings):
     RATE_LIMIT_PER_MINUTE: int = 100
 
     # AI Providers
+    # Comma-separated provider preference. Supported: xai, openai, anthropic/claude, gemini.
+    AI_PROVIDER_ORDER: str = "xai,openai,anthropic,gemini"
+    XAI_API_KEY: str = ""
+    XAI_MODEL: str = "grok-4.5"
+    XAI_BASE_URL: str = "https://api.x.ai/v1"
+    OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-4.1"
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
+    ANTHROPIC_API_KEY: str = ""
+    ANTHROPIC_MODEL: str = "claude-3-5-sonnet-latest"
+    ANTHROPIC_BASE_URL: str = "https://api.anthropic.com/v1"
+    ANTHROPIC_VERSION: str = "2023-06-01"
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-3.5-flash"
 
@@ -111,7 +123,7 @@ class Settings(BaseSettings):
     CELERY_BEAT_ENABLED: bool = True
 
     class Config:
-        env_file = ".env"
+        env_file = (".env", "../../.env")
         case_sensitive = True
 
     @property

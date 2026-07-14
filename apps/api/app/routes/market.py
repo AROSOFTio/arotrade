@@ -10,7 +10,7 @@ from app.config import settings
 from app.database import get_db
 from app.services import metaapi_gateway as metaapi, news
 
-import google.generativeai as genai
+from app.services.gemini import AIProviderError, AIProviderNotConfigured, ai_health_details, analyze_json
 
 router = APIRouter()
 
@@ -266,7 +266,7 @@ async def analyze_news_impact(
     symbol = str(payload.get("symbol", "")).upper().strip()
     if not symbol:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="symbol is required")
-    if not settings.GEMINI_API_KEY:
+    if not ai_health_details()["is_available"]:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="AI service not configured")
 
     cached = news.get_cached_impact(symbol)
@@ -298,11 +298,10 @@ async def analyze_news_impact(
         f"Symbol: {symbol}\nEconomic events:\n{event_lines}"
     )
     try:
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        model = genai.GenerativeModel(settings.GEMINI_MODEL)
-        response = model.generate_content(prompt, generation_config={"response_mime_type": "application/json", "temperature": 0.3})
-        data = json.loads(response.text)
-    except Exception as exc:
+        data = analyze_json(prompt, temperature=0.3)
+    except AIProviderNotConfigured:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="AI service not configured")
+    except AIProviderError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"News analysis failed: {exc}")
 
     result = {

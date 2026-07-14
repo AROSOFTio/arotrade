@@ -4,6 +4,7 @@ from sqlalchemy import text
 from app import models
 from app.schemas import HealthResponse, AIHealthResponse
 from app.config import settings
+from app.services.gemini import ai_health_details
 
 router = APIRouter()
 
@@ -58,15 +59,14 @@ async def version():
 
 @router.get("/ai/health", response_model=AIHealthResponse)
 async def ai_health():
-    """Check AI service health."""
-    gemini_available = bool(settings.GEMINI_API_KEY)
-
+    """Check configured AI provider availability."""
+    details = ai_health_details()
     return {
-        "status": "operational" if gemini_available else "unavailable",
-        "provider": "Gemini",
-        "model": settings.GEMINI_MODEL,
-        "is_available": gemini_available,
-        "timestamp": datetime.utcnow()
+        "status": details["status"],
+        "provider": details["provider"],
+        "model": details["model"],
+        "is_available": details["is_available"],
+        "timestamp": datetime.utcnow(),
     }
 
 

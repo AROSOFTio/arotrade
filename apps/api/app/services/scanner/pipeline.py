@@ -5,12 +5,12 @@ This is the main orchestration layer that runs on each new closed candle:
 1. Subscribe to broker quotes and candles (via MetaApi gateway)
 2. On new candle close:
    a. Pre-screen with deterministic TA (cheap, no AI)
-   b. If candidate found → call Gemini for validation/explanation
+   b. If candidate found -> call Gemini for validation/explanation
    c. Post-validate Gemini's response
    d. Create Signal record with fingerprint (idempotent)
    e. Create Notification
 3. Monitor approved signals for entry-zone price hits
-4. Never call Gemini on every tick — only on qualifying candidates
+4. Never call Gemini on every tick - only on qualifying candidates
 
 The pipeline is designed to run inside a Celery task or an asyncio loop
 so it does not block the API process.
@@ -41,7 +41,7 @@ from app.services.notify import notify_signal_event, create_notification
 logger = logging.getLogger(__name__)
 
 
-def _call_gemini_validation(
+def _call_ai_validation(
     candidate: CandidateSignal,
     candles: list[dict],
     symbol: str,
@@ -50,24 +50,24 @@ def _call_gemini_validation(
     ask: float,
 ) -> Optional[dict]:
     """
-    Call Gemini to validate a TA-discovered candidate.
+    Call AI to validate a TA-discovered candidate.
 
-    Returns the parsed Gemini response dict or None if Gemini is unavailable.
+    Returns the parsed Gemini response dict or None if AI is unavailable.
     Never lets Gemini override the numeric levels from the strategy engine.
-    Gemini can:
+    AI can:
       - Return buy/sell/hold (hold = reject)
-      - Adjust confidence within ±15 points
+      - Adjust confidence within +/-15 points
       - Explain the setup in simple language
       - Identify conflicting evidence
       - Identify news risks
     """
     try:
-        from app.services.gemini import run_chart_analysis, GeminiError, GeminiNotConfigured
+        from app.services.gemini import ai_health_details, run_chart_analysis, GeminiError, GeminiNotConfigured
         from app.services.metaapi_gateway import candles_to_prompt_context
     except ImportError:
         return None
 
-    if not settings.GEMINI_API_KEY:
+    if not ai_health_details()["is_available"]:
         return None
 
     price_context = candles_to_prompt_context(candles, max_rows=120)
@@ -76,7 +76,7 @@ def _call_gemini_validation(
         f"A technical strategy ({candidate.strategy_name}) has identified the following "
         f"setup on {symbol} {timeframe}:\n\n"
         f"Direction: {candidate.direction.upper()}\n"
-        f"Entry zone: {candidate.entry_min} – {candidate.entry_max}\n"
+        f"Entry zone: {candidate.entry_min} - {candidate.entry_max}\n"
         f"Stop-loss: {candidate.stop_loss}\n"
         f"Take-profit 1: {candidate.take_profit_1}\n"
         f"Risk/reward: {candidate.risk_reward:.2f}\n"
@@ -91,7 +91,7 @@ def _call_gemini_validation(
         "4. Use the EXACT SAME entry_min, entry_max, stop_loss, and take_profit_1 "
         "   from the strategy unless there is a clear structural error.\n"
         "5. Adjust confidence based on your analysis (strategy assigned "
-        f"   {candidate.confidence}% — your final score should reflect your conviction).\n"
+        f"   {candidate.confidence}% - your final score should reflect your conviction).\n"
         "6. Signal 'hold' only if there is a genuine structural conflict.\n"
         "7. Never claim guaranteed results."
     )
@@ -105,10 +105,10 @@ def _call_gemini_validation(
         )
         return result
     except (GeminiNotConfigured, GeminiError) as exc:
-        logger.warning("Gemini validation failed for %s %s: %s", symbol, timeframe, exc)
+        logger.warning("AI validation failed for %s %s: %s", symbol, timeframe, exc)
         return None
     except Exception as exc:
-        logger.error("Unexpected Gemini error: %s", exc, exc_info=True)
+        logger.error("Unexpected AI provider error: %s", exc, exc_info=True)
         return None
 
 
@@ -223,19 +223,19 @@ def run_scanner_pipeline(
 
     if existing:
         logger.info(
-            "Duplicate signal fingerprint %s — skipping (existing id=%d)", fingerprint, existing.id
+            "Duplicate signal fingerprint %s - skipping (existing id=%d)", fingerprint, existing.id
         )
         return None
 
     # -----------------------------------------------------------------------
-    # Step 5: Gemini validation
+    # Step 5: AI validation
     # -----------------------------------------------------------------------
-    gemini_result = _call_gemini_validation(
+    gemini_result = _call_ai_validation(
         candidate, candles, symbol, timeframe, bid, ask
     )
 
     # -----------------------------------------------------------------------
-    # Step 6: Merge Gemini result into candidate
+    # Step 6: Merge AI result into candidate
     # -----------------------------------------------------------------------
     confidence = candidate.confidence
     reasoning = list(candidate.reasoning)
@@ -247,19 +247,19 @@ def run_scanner_pipeline(
         gemini_signal = gemini_result.get("signal", "hold")
         if gemini_signal == "hold":
             logger.info(
-                "Gemini returned hold for %s %s — signal rejected", symbol, timeframe
+                "AI validation returned hold for %s %s - signal rejected", symbol, timeframe
             )
             return None
 
         # Gemini must agree on direction
         if gemini_signal != candidate.direction:
             logger.info(
-                "Gemini disagrees with strategy direction (%s vs %s) for %s %s",
+                "AI validation disagrees with strategy direction (%s vs %s) for %s %s",
                 gemini_signal, candidate.direction, symbol, timeframe,
             )
             return None
 
-        # Adjust confidence (strategy confidence ± Gemini delta, capped to max ±15)
+        # Adjust confidence (strategy confidence +/- Gemini delta, capped to max +/-15)
         gemini_conf = gemini_result.get("confidence", confidence)
         delta = max(-15, min(15, gemini_conf - candidate.confidence))
         confidence = max(0, min(100, candidate.confidence + delta))
@@ -352,10 +352,10 @@ def run_scanner_pipeline(
         create_notification(
             db,
             user_id=user.id,
-            title=f"🔔 Auto signal: {candidate.direction.upper()} {symbol}",
+            title=f"Auto signal: {candidate.direction.upper()} {symbol}",
             body=(
                 f"{symbol} {timeframe} | {candidate.direction.upper()} | "
-                f"Entry {candidate.entry_min:.5f}–{candidate.entry_max:.5f} | "
+                f"Entry {candidate.entry_min:.5f}-{candidate.entry_max:.5f} | "
                 f"SL {candidate.stop_loss:.5f} | TP {candidate.take_profit_1:.5f} | "
                 f"Confidence {confidence}% | RR {candidate.risk_reward:.1f}"
             ),
@@ -379,7 +379,7 @@ def run_scanner_pipeline(
         )
         # If this is a unique-constraint violation (race condition), it's safe to ignore
         if "uq_signal_fingerprint" in str(exc).lower() or "unique" in str(exc).lower():
-            logger.info("Signal fingerprint race condition — already exists")
+            logger.info("Signal fingerprint race condition - already exists")
         return None
 
 
