@@ -199,6 +199,26 @@ def get_broker_account_metrics(account: models.BrokerAccount, execution_mode: st
     )
 
 
+def _lookup_tradeable_broker_symbol(db: Session, account_id: int, lookup: str) -> Optional[str]:
+    broker_symbol = db.query(models.BrokerSymbol).filter(
+        models.BrokerSymbol.broker_account_id == account_id,
+        func.upper(func.trim(models.BrokerSymbol.broker_symbol)) == lookup,
+        models.BrokerSymbol.trade_allowed == True,  # noqa: E712
+    ).first()
+    if broker_symbol:
+        return broker_symbol.broker_symbol
+
+    broker_symbol = db.query(models.BrokerSymbol).filter(
+        models.BrokerSymbol.broker_account_id == account_id,
+        func.upper(func.trim(models.BrokerSymbol.canonical_symbol)) == lookup,
+        models.BrokerSymbol.trade_allowed == True,  # noqa: E712
+    ).first()
+    if broker_symbol:
+        return broker_symbol.broker_symbol
+
+    return None
+
+
 def resolve_broker_symbol(db: Session, canonical_symbol: str, account: models.BrokerAccount) -> str:
     """Resolve the exact broker symbol for a specific account.
 
@@ -206,26 +226,27 @@ def resolve_broker_symbol(db: Session, canonical_symbol: str, account: models.Br
     symbol (XAUUSDm, US30_x10m). Prefer exact broker-symbol matches first,
     then fall back to canonical mapping.
     """
-    requested = canonical_symbol.strip()
+    requested = str(canonical_symbol or "").strip()
     lookup = requested.upper()
     if not lookup:
         raise ExecutionError("No symbol provided to resolve.")
 
-    broker_symbol = db.query(models.BrokerSymbol).filter(
-        models.BrokerSymbol.broker_account_id == account.id,
-        func.upper(models.BrokerSymbol.broker_symbol) == lookup,
-        models.BrokerSymbol.trade_allowed == True,  # noqa: E712
-    ).first()
+    broker_symbol = _lookup_tradeable_broker_symbol(db, account.id, lookup)
     if broker_symbol:
-        return broker_symbol.broker_symbol
+        return broker_symbol
 
-    broker_symbol = db.query(models.BrokerSymbol).filter(
-        models.BrokerSymbol.broker_account_id == account.id,
-        func.upper(models.BrokerSymbol.canonical_symbol) == lookup,
-        models.BrokerSymbol.trade_allowed == True,  # noqa: E712
-    ).first()
+    try:
+        from app.services.broker_symbol_sync import sync_broker_symbols_for_account
+
+        sync_result = sync_broker_symbols_for_account(db, account)
+        if sync_result.synced:
+            db.flush()
+            broker_symbol = _lookup_tradeable_broker_symbol(db, account.id, lookup)
+    except Exception as exc:
+        logger.info("Could not refresh broker symbols for account %s: %s", account.id, exc)
+
     if broker_symbol:
-        return broker_symbol.broker_symbol
+        return broker_symbol
 
     # Fallback: check the broker directly for the requested exact name.
     try:
@@ -240,7 +261,7 @@ def resolve_broker_symbol(db: Session, canonical_symbol: str, account: models.Br
 
 def resolve_signal_broker_symbol(db: Session, signal: models.Signal, account: models.BrokerAccount) -> str:
     """Resolve and persist the exact broker symbol for this signal's account."""
-    canonical = (signal.canonical_symbol or signal.symbol or "").upper().strip()
+    canonical = (getattr(signal, "canonical_symbol", None) or signal.symbol or "").upper().strip()
     resolved = resolve_broker_symbol(db, canonical, account)
     signal.broker_symbol = resolved
     signal.canonical_symbol = canonical

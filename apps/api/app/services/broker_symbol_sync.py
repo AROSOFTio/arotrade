@@ -98,7 +98,7 @@ def _compact(symbol: str) -> str:
 
 def canonical_symbol_for_broker_symbol(broker_symbol: str) -> Optional[str]:
     compact = _compact(broker_symbol)
-    if compact in {"GOLD", "GOLDM"}:
+    if compact in {"GOLD", "GOLDM", "XAUSDM"}:
         return "XAUUSD"
 
     for canonical in sorted(KNOWN_CANONICAL_SYMBOLS, key=len, reverse=True):

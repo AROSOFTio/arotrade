@@ -22,7 +22,14 @@ config_module.settings = SimpleNamespace(
 config_module.DATABASE_URL = "sqlite:///:memory:"
 sys.modules.setdefault("app.config", config_module)
 
-from app.services.execution import evaluate_signal_for_execution, utc_now, execute_signal_trade, verify_live_broker_account
+from app.services.broker_symbol_sync import canonical_symbol_for_broker_symbol
+from app.services.execution import (
+    evaluate_signal_for_execution,
+    execute_signal_trade,
+    resolve_broker_symbol,
+    utc_now,
+    verify_live_broker_account,
+)
 from app import models
 
 
@@ -52,6 +59,28 @@ def active_user(**overrides):
 
 
 class SignalExecutionGateTests(unittest.TestCase):
+    def test_xausdm_maps_to_canonical_gold_symbol(self):
+        self.assertEqual(canonical_symbol_for_broker_symbol("XAUSDM"), "XAUUSD")
+
+    @patch("app.services.broker_symbol_sync.sync_broker_symbols_for_account")
+    @patch("app.services.execution.metaapi")
+    def test_resolve_broker_symbol_refreshes_symbol_map_before_error(self, mock_metaapi, mock_sync):
+        db_mock = MagicMock()
+        db_mock.query().filter().first.side_effect = [
+            None,
+            None,
+            SimpleNamespace(broker_symbol="XAUSDM"),
+        ]
+        mock_sync.return_value = SimpleNamespace(synced=1, skipped=0, error=None)
+        account = SimpleNamespace(id=7, metaapi_account_id="acct-7")
+
+        resolved = resolve_broker_symbol(db_mock, "XAUSDM", account)
+
+        self.assertEqual(resolved, "XAUSDM")
+        mock_sync.assert_called_once_with(db_mock, account)
+        db_mock.flush.assert_called_once()
+        mock_metaapi.get_symbol_specification.assert_not_called()
+
     @patch("app.services.execution.metaapi")
     def test_live_verification_accepts_rest_response_without_sync_status(self, mock_meta):
         mock_meta.get_account.return_value = {
