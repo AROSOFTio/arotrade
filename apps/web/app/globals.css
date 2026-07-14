@@ -25,13 +25,13 @@
   --brand: #20b955;
   --brand-dark: #2fd266;
   --brand-soft: rgba(32, 185, 85, 0.14);
-  --app-bg: #111314;
-  --surface: #1d1f20;
-  --surface-subtle: #242728;
-  --border: #34393b;
-  --border-soft: #2a2f31;
-  --text: #e8ecef;
-  --muted: #8d969b;
+  --app-bg: #25282b;
+  --surface: #2d3033;
+  --surface-subtle: #33373a;
+  --border: #4a4f53;
+  --border-soft: #3d4246;
+  --text: #dce2e6;
+  --muted: #a1abb1;
   --success: #4ade80;
   --success-bg: rgba(34, 197, 94, 0.12);
   --warning: #fbbf24;
@@ -57,7 +57,7 @@ body {
   margin: 0;
   background: var(--app-bg);
   color: var(--text);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: "Helvetica Neue", Arial, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -98,16 +98,16 @@ textarea:focus-visible {
 }
 
 .dark ::-webkit-scrollbar-track {
-  background: #151819;
+  background: #2b2f32;
 }
 
 .dark ::-webkit-scrollbar-thumb {
-  background: #3d4446;
-  border-color: #151819;
+  background: #565d62;
+  border-color: #2b2f32;
 }
 
 .dark ::-webkit-scrollbar-thumb:hover {
-  background: #525a5d;
+  background: #687176;
 }
 
 /* ============================================================
@@ -116,15 +116,15 @@ textarea:focus-visible {
    nothing is inverted or filtered.
    ============================================================ */
 .dark .bg-white { background-color: var(--surface); }
-.dark .bg-white\/90 { background-color: rgba(29, 31, 32, 0.94); }
+.dark .bg-white\/90 { background-color: rgba(45, 48, 51, 0.94); }
 .dark .bg-\[\#f6f7f9\] { background-color: var(--app-bg); }
 .dark .bg-slate-50 { background-color: var(--surface-subtle); }
-.dark .bg-slate-50\/60 { background-color: rgba(36, 39, 40, 0.72); }
-.dark .bg-slate-100 { background-color: #2b2f31; }
+.dark .bg-slate-50\/60 { background-color: rgba(51, 55, 58, 0.76); }
+.dark .bg-slate-100 { background-color: #383d41; }
 .dark .bg-slate-900 { background-color: #d7dde0; }
-.dark .bg-blue-50 { background-color: #252829; }
-.dark .bg-blue-50\/50 { background-color: rgba(37, 40, 41, 0.72); }
-.dark .bg-blue-50\/60 { background-color: rgba(37, 40, 41, 0.82); }
+.dark .bg-blue-50 { background-color: #34383a; }
+.dark .bg-blue-50\/50 { background-color: rgba(52, 56, 58, 0.74); }
+.dark .bg-blue-50\/60 { background-color: rgba(52, 56, 58, 0.82); }
 .dark .bg-blue-100 { background-color: rgba(32, 185, 85, 0.16); }
 .dark .bg-\[\#f0fdf4\] { background-color: rgba(34, 197, 94, 0.12); }
 .dark .bg-emerald-50 { background-color: rgba(34, 197, 94, 0.12); }
@@ -132,10 +132,10 @@ textarea:focus-visible {
 .dark .bg-red-50 { background-color: rgba(239, 68, 68, 0.12); }
 .dark .bg-amber-50 { background-color: rgba(245, 158, 11, 0.12); }
 
-.dark .text-slate-950, .dark .text-slate-900 { color: #e8ecef; }
-.dark .text-slate-800, .dark .text-slate-700 { color: #c5cdd1; }
-.dark .text-slate-600, .dark .text-slate-500 { color: #8d969b; }
-.dark .text-slate-400 { color: #6f787d; }
+.dark .text-slate-950, .dark .text-slate-900 { color: #dce2e6; }
+.dark .text-slate-800, .dark .text-slate-700 { color: #c1c9ce; }
+.dark .text-slate-600, .dark .text-slate-500 { color: #a1abb1; }
+.dark .text-slate-400 { color: #879096; }
 .dark .text-white { color: #ffffff; }
 .dark .bg-slate-900.text-white, .dark .bg-slate-900 { color: #111314; }
 .dark .text-\[\#2563eb\], .dark .text-\[\#1d4ed8\] { color: var(--brand); }
@@ -162,8 +162,8 @@ textarea:focus-visible {
 .dark .text-\[\#991b1b\] { color: #ff7b72; }
 
 .dark .border-slate-100, .dark .border-slate-200 { border-color: var(--border); }
-.dark .border-slate-300 { border-color: #3d4446; }
-.dark .border-blue-100, .dark .border-blue-200 { border-color: #3a433d; }
+.dark .border-slate-300 { border-color: #555c61; }
+.dark .border-blue-100, .dark .border-blue-200 { border-color: #4d584f; }
 .dark .border-emerald-200 { border-color: rgba(34, 197, 94, 0.35); }
 .dark .border-red-200 { border-color: rgba(239, 68, 68, 0.35); }
 .dark .border-amber-200 { border-color: rgba(245, 158, 11, 0.35); }
@@ -171,10 +171,10 @@ textarea:focus-visible {
 .dark .divide-slate-50 > :not([hidden]) ~ :not([hidden]) { border-color: var(--border-soft); }
 .dark .border-slate-50 { border-color: var(--border-soft); }
 
-.dark .hover\:bg-slate-50:hover { background-color: #2b2f31; }
-.dark .hover\:bg-blue-50:hover { background-color: #303532; }
+.dark .hover\:bg-slate-50:hover { background-color: #3a3f43; }
+.dark .hover\:bg-blue-50:hover { background-color: #3f4641; }
 .dark .hover\:text-slate-950:hover, .dark .hover\:text-slate-900:hover { color: #f8fafc; }
-.dark .hover\:border-slate-400:hover { border-color: #4a5153; }
+.dark .hover\:border-slate-400:hover { border-color: #666f75; }
 .dark .hover\:text-\[\#1d4ed8\]:hover { color: #7ee69b; }
 .dark .placeholder\:text-slate-400::placeholder { color: #646c70; }
 .dark .shadow-sm { box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.4); }
@@ -237,14 +237,14 @@ textarea:focus-visible {
 .dark .btn-primary:hover { background-color: var(--brand-dark); }
 .dark .btn-secondary,
 .dark .icon-button {
-  background-color: #242728;
-  border-color: #3a3f41;
+  background-color: #34383a;
+  border-color: #555c61;
   color: #c5cdd1;
 }
 .dark .btn-secondary:hover,
 .dark .icon-button:hover {
-  background-color: #2f3335;
-  border-color: #4a5153;
+  background-color: #3f4549;
+  border-color: #687176;
   color: #f2f5f6;
 }
 .dark .card {
@@ -253,11 +253,26 @@ textarea:focus-visible {
   box-shadow: none;
 }
 .dark .input-base {
-  background-color: #242728;
-  border-color: #3a3f41;
+  background-color: #34383a;
+  border-color: #555c61;
   color: #e8ecef;
 }
 .dark .input-base:focus {
   border-color: var(--brand);
   box-shadow: 0 0 0 2px rgba(32, 185, 85, 0.22);
 }
+.dark body {
+  font-size: 14px;
+  line-height: 1.45;
+}
+.dark .font-bold { font-weight: 600; }
+.dark .font-semibold { font-weight: 500; }
+.dark h1,
+.dark h2,
+.dark h3 {
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.dark .text-2xl { font-size: 1.375rem; line-height: 1.9rem; }
+.dark .text-lg { font-size: 1.0625rem; line-height: 1.55rem; }
+.dark .text-sm { line-height: 1.35rem; }

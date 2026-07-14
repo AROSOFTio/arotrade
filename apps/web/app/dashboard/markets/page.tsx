@@ -12,6 +12,8 @@ type BrokerAccount = {
   broker: string
   account_id: string
   account_type: string
+  balance: number
+  currency: string
   is_active: boolean
   connection_state?: string | null
 }
@@ -23,7 +25,7 @@ type SymbolItem = {
   category?: string
 }
 
-type Candle = { time: number; open: number; high: number; low: number; close: number }
+type Candle = { time?: number | string; brokerTime?: string; open: number; high: number; low: number; close: number }
 type Price = { symbol: string; price: number; change: number; change_percent: number }
 type NewsEvent = { title: string; currency: string; date: string; impact: string; forecast?: string | null; previous?: string | null }
 type NewsImpact = { symbol: string; summary: string; key_events?: { title: string; when: string; expectation: string }[] }
@@ -70,6 +72,16 @@ const updateTime = (date: Date | null) => date ? date.toLocaleTimeString([], { h
 const parsedMaxLiveRiskPercent = Number(process.env.NEXT_PUBLIC_MAX_LIVE_RISK_PERCENT || '0.25')
 const maxLiveRiskPercent = Number.isFinite(parsedMaxLiveRiskPercent) && parsedMaxLiveRiskPercent > 0 ? parsedMaxLiveRiskPercent : 0.25
 
+const toChartTimestamp = (candle: Candle): UTCTimestamp | null => {
+  const raw = candle.time ?? candle.brokerTime
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw as UTCTimestamp
+  if (typeof raw === 'string') {
+    const parsed = Date.parse(raw.includes('T') ? raw : raw.replace(' ', 'T') + 'Z')
+    if (Number.isFinite(parsed)) return Math.floor(parsed / 1000) as UTCTimestamp
+  }
+  return null
+}
+
 export default function MarketsPage() {
   const [accounts, setAccounts] = useState<BrokerAccount[]>([])
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null)
@@ -86,6 +98,7 @@ export default function MarketsPage() {
   const [impactUpdatedAt, setImpactUpdatedAt] = useState<Date | null>(null)
   const [sotdUpdatedAt, setSotdUpdatedAt] = useState<Date | null>(null)
   const [error, setError] = useState('')
+  const [chartMessage, setChartMessage] = useState('')
   const [accountsLoading, setAccountsLoading] = useState(true)
   const chartContainerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
@@ -206,7 +219,17 @@ export default function MarketsPage() {
       .finally(() => setAccountsLoading(false))
   }, [])
 
+  useEffect(() => {
+    if (!selectedAccountId) return
+    apiRequest<BrokerAccount>(`/broker-accounts/${selectedAccountId}/state`)
+      .then((updated) => {
+        setAccounts((current) => current.map((account) => account.id === updated.id ? updated : account))
+      })
+      .catch(() => undefined)
+  }, [selectedAccountId])
+
   // 2. Fetch symbols once account is selected
+
   useEffect(() => {
     if (!selectedAccountId) return
     apiRequest<{ symbols: SymbolItem[] }>(`/market/accounts/${selectedAccountId}/symbols`)
@@ -228,15 +251,15 @@ export default function MarketsPage() {
 
     const themeOptions = (dark: boolean) => ({
       layout: {
-        background: { color: dark ? '#101828' : '#ffffff' },
-        textColor: dark ? '#94a3b8' : '#334155',
+        background: { color: dark ? '#2d3033' : '#ffffff' },
+        textColor: dark ? '#a1abb1' : '#334155',
       },
       grid: {
-        vertLines: { color: dark ? '#182238' : '#f1f5f9' },
-        horzLines: { color: dark ? '#182238' : '#f1f5f9' },
+        vertLines: { color: dark ? '#3d4246' : '#f1f5f9' },
+        horzLines: { color: dark ? '#3d4246' : '#f1f5f9' },
       },
-      timeScale: { timeVisible: true, secondsVisible: false, borderColor: dark ? '#1e293f' : '#e2e8f0' },
-      rightPriceScale: { borderColor: dark ? '#1e293f' : '#e2e8f0' },
+      timeScale: { timeVisible: true, secondsVisible: false, borderColor: dark ? '#4a4f53' : '#e2e8f0' },
+      rightPriceScale: { borderColor: dark ? '#4a4f53' : '#e2e8f0' },
     })
 
     const isDark = () => document.documentElement.classList.contains('dark')
@@ -274,8 +297,15 @@ export default function MarketsPage() {
       const response = await apiRequest<{ candles: Candle[] }>(
         `/market/accounts/${selectedAccountId}/symbols/${selectedSymbol.broker_symbol}/candles?timeframe=${timeframe}&count=300`
       )
-      seriesRef.current?.setData(response.candles.map((c) => ({ ...c, time: c.time as UTCTimestamp })))
+      const chartData = response.candles
+        .map((c) => {
+          const time = toChartTimestamp(c)
+          return time ? { open: c.open, high: c.high, low: c.low, close: c.close, time } : null
+        })
+        .filter((c): c is { open: number; high: number; low: number; close: number; time: UTCTimestamp } => Boolean(c))
+      seriesRef.current?.setData(chartData)
       chartRef.current?.timeScale().fitContent()
+      setChartMessage(chartData.length ? '' : 'No candle data returned for this symbol/timeframe.')
       setError('')
     } catch (requestError) {
       setError(errorMessage(requestError))
@@ -454,6 +484,10 @@ export default function MarketsPage() {
   }
 
   const selectedAccount = accounts.find(a => a.id === selectedAccountId)
+  const accountCurrency = previewData?.account_currency || selectedAccount?.currency || 'USD'
+  const displayedBalance = previewData?.balance ?? selectedAccount?.balance
+  const displayedEquity = previewData?.equity
+  const displayedFreeMargin = previewData?.free_margin_after
   const previewRiskWarnings = previewData?.risk_warnings ?? []
   const previewHasBlockingRisk = previewRiskWarnings.length > 0
 
@@ -507,11 +541,17 @@ export default function MarketsPage() {
           </select>
         </div>
         {selectedAccount && (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
               selectedAccount.account_type === 'live' ? 'bg-[#f0fdf4] text-[#166534] border border-[#bbf7d0]' : 'bg-[#eff6ff] text-[#1e40af] border border-[#bfdbfe]'
             }`}>
               {selectedAccount.account_type === 'live' ? 'LIVE MT5' : 'DEMO MT5'}
+            </span>
+            <span className="text-xs font-semibold text-slate-600">
+              Balance:{' '}
+              <span className="tabular-nums text-slate-950">
+                {accountCurrency} {formatNumber(displayedBalance ?? 0, 2)}
+              </span>
             </span>
           </div>
         )}
@@ -557,7 +597,14 @@ export default function MarketsPage() {
               </div>
             )}
           </div>
-          <div ref={chartContainerRef} className="w-full" />
+          <div className="relative">
+            <div ref={chartContainerRef} className="w-full" />
+            {chartMessage && (
+              <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-sm font-medium text-slate-500">
+                {chartMessage}
+              </div>
+            )}
+          </div>
           <p className="border-t border-slate-100 px-5 py-2.5 text-xs text-slate-400">
             MT5 live feed · updates every 30s · quotes every 10s
           </p>
@@ -590,6 +637,21 @@ export default function MarketsPage() {
                 <p className="text-[11px] leading-4 font-semibold text-amber-800">LIVE BROKER — Real financial risk. Verify all levels before executing.</p>
               </div>
             )}
+
+            <div className="mt-3 grid grid-cols-3 gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[11px]">
+              <div>
+                <p className="font-semibold uppercase text-slate-500">Balance</p>
+                <p className="mt-0.5 font-bold tabular-nums text-slate-950">{accountCurrency} {formatNumber(displayedBalance ?? 0, 2)}</p>
+              </div>
+              <div>
+                <p className="font-semibold uppercase text-slate-500">Equity</p>
+                <p className="mt-0.5 font-bold tabular-nums text-slate-950">{displayedEquity != null ? `${accountCurrency} ${formatNumber(displayedEquity, 2)}` : 'Preview'}</p>
+              </div>
+              <div>
+                <p className="font-semibold uppercase text-slate-500">Free after</p>
+                <p className="mt-0.5 font-bold tabular-nums text-slate-950">{displayedFreeMargin != null ? `${accountCurrency} ${formatNumber(displayedFreeMargin, 2)}` : 'Preview'}</p>
+              </div>
+            </div>
 
             {/* Live Bid / Ask / Spread */}
             <div className="mt-3 grid grid-cols-3 gap-2 text-center">
