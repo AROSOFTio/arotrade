@@ -6,6 +6,7 @@ from datetime import datetime, UTC
 from secrets import token_hex
 from typing import Optional
 from uuid import uuid4
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 
@@ -199,30 +200,43 @@ def get_broker_account_metrics(account: models.BrokerAccount, execution_mode: st
 
 
 def resolve_broker_symbol(db: Session, canonical_symbol: str, account: models.BrokerAccount) -> str:
-    """Resolve the exact broker symbol for a specific account.  Always re-resolves."""
-    canonical = canonical_symbol.upper().strip()
-    if not canonical:
+    """Resolve the exact broker symbol for a specific account.
+
+    The UI may submit either a canonical symbol (XAUUSD) or an exact broker
+    symbol (XAUUSDm, US30_x10m). Prefer exact broker-symbol matches first,
+    then fall back to canonical mapping.
+    """
+    requested = canonical_symbol.strip()
+    lookup = requested.upper()
+    if not lookup:
         raise ExecutionError("No symbol provided to resolve.")
 
     broker_symbol = db.query(models.BrokerSymbol).filter(
         models.BrokerSymbol.broker_account_id == account.id,
-        models.BrokerSymbol.canonical_symbol == canonical,
+        func.upper(models.BrokerSymbol.broker_symbol) == lookup,
         models.BrokerSymbol.trade_allowed == True,  # noqa: E712
     ).first()
     if broker_symbol:
         return broker_symbol.broker_symbol
 
-    # Fallback: check the broker directly for the canonical name
+    broker_symbol = db.query(models.BrokerSymbol).filter(
+        models.BrokerSymbol.broker_account_id == account.id,
+        func.upper(models.BrokerSymbol.canonical_symbol) == lookup,
+        models.BrokerSymbol.trade_allowed == True,  # noqa: E712
+    ).first()
+    if broker_symbol:
+        return broker_symbol.broker_symbol
+
+    # Fallback: check the broker directly for the requested exact name.
     try:
-        metaapi.get_symbol_specification(account.metaapi_account_id, canonical)
+        metaapi.get_symbol_specification(account.metaapi_account_id, requested)
     except Exception as exc:
         raise ExecutionError(
-            f"Exact broker symbol for {canonical} is not configured for this account. "
+            f"Exact broker symbol for {requested} is not configured for this account. "
             "Refresh broker symbols before executing."
         ) from exc
 
-    return canonical
-
+    return requested
 
 def resolve_signal_broker_symbol(db: Session, signal: models.Signal, account: models.BrokerAccount) -> str:
     """Resolve and persist the exact broker symbol for this signal's account."""
