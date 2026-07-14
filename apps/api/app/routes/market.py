@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, UTC
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
