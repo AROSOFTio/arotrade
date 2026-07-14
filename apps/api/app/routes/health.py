@@ -1,5 +1,7 @@
 from fastapi import APIRouter
 from datetime import datetime
+from sqlalchemy import text
+from app import models
 from app.schemas import HealthResponse, AIHealthResponse
 from app.config import settings
 
@@ -20,7 +22,7 @@ async def health_check():
     
     try:
         # Check database connection
-        db.execute(models.sa.text("SELECT 1"))
+        db.execute(text("SELECT 1"))
         details["database"] = "connected"
     except Exception as exc:
         status_str = "degraded"
