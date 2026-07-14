@@ -150,8 +150,8 @@ POSTGRES_PASSWORD=<generate-secure>
 REDIS_URL=redis://redis:6379/0
 
 # Security
-JWT_SECRET=<generate-secure>
-ENCRYPTION_KEY=<32-char-key>
+JWT_SECRET=<generate-32+-character-secret>
+ENCRYPTION_KEY=<generate-32+-character-secret>
 
 # AI
 GEMINI_API_KEY=<your-key>
@@ -159,10 +159,15 @@ GEMINI_MODEL=gemini-2.5-flash
 
 # Trading
 DERIV_APP_ID=<optional>
-ENABLE_LIVE_TRADING=false  # CRITICAL: Keep disabled by default
+ENABLE_LIVE_TRADING=true
 METAAPI_TOKEN=<your-metaapi-token>
 METAAPI_REGION=london
 MAX_LIVE_RISK_PERCENT=0.25
+MAX_OPEN_TRADES_PER_SYMBOL=1
+MAX_ACCOUNT_DRAWDOWN_PERCENT=25.0
+MAX_ACCOUNT_EXPOSURE_PERCENT=80.0
+MAX_BROKER_SPREAD_POINTS=0.0
+BLOCK_SIGNAL_ON_NEWS_FETCH_FAILURE=true
 NEXT_PUBLIC_MAX_LIVE_RISK_PERCENT=0.25
 
 # Future Providers (commented)
@@ -188,7 +193,11 @@ Validates every trade:
 - Risk per trade ≤ max
 - Daily/weekly loss limits
 - Account drawdown checks
-- News filter checks
+- Per-symbol position caps
+- Broker spread checks
+- Duplicate signal-intent checks
+- News blackout checks for signal trades
+- Broker margin and account exposure checks
 
 ### Demo Trading
 Paper trading engine for strategy testing:

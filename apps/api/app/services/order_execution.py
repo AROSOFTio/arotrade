@@ -404,10 +404,13 @@ def preview_manual_order(
         volume=plan.final_volume, execution_mode=execution_mode, quote=quote,
         stop_loss=stop_loss, quote_time_str=quote_time_str,
         open_trade_count=open_trade_count, daily_realized_pnl=daily_loss,
-        equity=metrics.equity, free_margin=metrics.free_margin,
+        equity=metrics.equity, balance=metrics.balance, free_margin=metrics.free_margin,
+        current_margin=metrics.margin,
         required_margin=required_margin,
         free_margin_after_trade=free_margin_after,
         effective_risk_percent=plan.effective_risk_percent,
+        symbol=broker_symbol,
+        symbol_point=spec.tick_size,
     )
     if not risk_result.approved:
         risk_warnings = risk_result.reasons
@@ -545,10 +548,13 @@ def execute_manual_order(
             volume=plan.final_volume, execution_mode=execution_mode, quote=quote,
             stop_loss=stop_loss, quote_time_str=quote_time_str,
             open_trade_count=open_trade_count, daily_realized_pnl=daily_loss,
-            equity=metrics.equity, free_margin=metrics.free_margin,
+            equity=metrics.equity, balance=metrics.balance, free_margin=metrics.free_margin,
+            current_margin=metrics.margin,
             required_margin=required_margin,
             free_margin_after_trade=free_margin_after,
             effective_risk_percent=plan.effective_risk_percent,
+            symbol=broker_symbol,
+            symbol_point=spec.tick_size,
         )
         if not risk_result.approved:
             raise ExecutionError(f"Risk engine rejected: {'; '.join(risk_result.reasons)}")

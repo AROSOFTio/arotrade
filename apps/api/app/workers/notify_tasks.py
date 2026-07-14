@@ -175,13 +175,43 @@ def check_entry_zones(self):
                         logger.info("Auto-executing approved signal %d entering zone", signal.id)
                         signal.execution_started_at = now
                         signal.lifecycle_status = models.SignalLifecycleStatus.EXECUTION_PENDING.value
-                        execute_signal_trade(
+                        trade = execute_signal_trade(
                             db,
                             user_id=signal.user_id,
                             signal_id=signal.id,
                             broker_account_id=signal.broker_account_id,
                             execution_mode=signal.execution_mode,
                             is_jump_in=False,
+                        )
+                        signal.lifecycle_status = models.SignalLifecycleStatus.OPEN.value
+                        db.add(models.ExecutionAudit(
+                            user_id=signal.user_id,
+                            signal_id=signal.id,
+                            trade_id=getattr(trade, "id", None),
+                            broker="metaapi" if signal.execution_mode in ("broker_demo", "live") else "paper",
+                            mode=signal.execution_mode,
+                            outcome="submitted",
+                            reason="Entry-zone monitor auto-executed approved signal",
+                            details={
+                                "source": "entry_zone_monitor",
+                                "broker_account_id": signal.broker_account_id,
+                                "broker_symbol": signal.broker_symbol,
+                                "entry_min": signal.entry_min,
+                                "entry_max": signal.entry_max,
+                                "latest_price": mid,
+                                "trade_id": getattr(trade, "id", None),
+                            },
+                        ))
+                        create_notification(
+                            db,
+                            user_id=signal.user_id,
+                            title=f"Order executed: {signal.signal_type.upper()} {signal.symbol}",
+                            body=(
+                                f"{signal.symbol} {signal.timeframe} {signal.signal_type.upper()} "
+                                f"was auto-executed after price entered the approved zone."
+                            ),
+                            category="trade",
+                            link=f"/dashboard/trades?trade={getattr(trade, 'id', '')}",
                         )
                     except Exception as e:
                         reason = str(e)

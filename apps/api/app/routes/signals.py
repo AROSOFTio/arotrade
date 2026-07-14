@@ -253,6 +253,21 @@ async def preview_execution(
     from app.services.execution import _get_daily_loss
     daily_loss = _get_daily_loss(db, user.id)
 
+    margin_result = {"requiredMargin": 0.0, "freeMarginAfterTrade": metrics.free_margin}
+    if request.execution_mode in ("broker_demo", "live") and not sizing.blocked:
+        try:
+            margin_result = metaapi.calculate_margin(
+                account.metaapi_account_id,
+                broker_symbol,
+                signal.signal_type,
+                sizing.final_volume,
+                observed_price,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Broker margin calculation failed: {exc}")
+        required_margin = float(margin_result.get("requiredMargin") or 0.0)
+        margin_result["freeMarginAfterTrade"] = metrics.free_margin - required_margin
+
     quote_time_str = quote.get("time") or quote.get("brokerTime")
     risk_result = run_risk_checks(
         db=db,
@@ -267,8 +282,14 @@ async def preview_execution(
         open_trade_count=open_trade_count,
         daily_realized_pnl=daily_loss,
         equity=metrics.equity,
+        balance=metrics.balance,
         free_margin=metrics.free_margin,
+        current_margin=metrics.margin,
+        required_margin=float(margin_result.get("requiredMargin") or 0.0),
+        free_margin_after_trade=float(margin_result.get("freeMarginAfterTrade") or metrics.free_margin),
         effective_risk_percent=effective_risk_percent,
+        symbol=broker_symbol,
+        symbol_point=spec.tick_size,
         is_jump_in=True,
     )
 

@@ -1,3 +1,4 @@
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 from typing import List
 import os
@@ -6,7 +7,7 @@ import os
 class Settings(BaseSettings):
     # App
     APP_NAME: str = "AroTrade AI"
-    APP_ENV: str = "production"
+    APP_ENV: str = "development"
     APP_URL: str = "https://arotrader.arosoftlabs.com"
     DEBUG: bool = False
 
@@ -21,13 +22,13 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
 
     # JWT
-    JWT_SECRET: str = "change_me_very_secure_jwt_secret"
+    JWT_SECRET: str = ""
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRATION_HOURS: int = 24
     JWT_REFRESH_EXPIRATION_DAYS: int = 7
 
     # Encryption
-    ENCRYPTION_KEY: str = "change_me_32_char_encryption_key"
+    ENCRYPTION_KEY: str = ""
 
     # CORS
     # Comma-separated list of origins. Kept as a plain str field (rather than
@@ -69,6 +70,9 @@ class Settings(BaseSettings):
     METAAPI_REGION: str = "london"
     MAX_LIVE_ORDER_VOLUME: float = 1.0
     MAX_LIVE_RISK_PERCENT: float = 0.25
+    MAX_OPEN_TRADES_PER_SYMBOL: int = 1
+    MAX_ACCOUNT_EXPOSURE_PERCENT: float = 80.0
+    MAX_BROKER_SPREAD_POINTS: float = 0.0
 
     # Email (optional - notifications are skipped if SMTP_HOST is empty)
     SMTP_HOST: str = ""
@@ -93,6 +97,7 @@ class Settings(BaseSettings):
     MAX_WEEKLY_LOSS_PERCENT: float = 5.0
     MAX_OPEN_TRADES: int = 5
     MAX_ACCOUNT_DRAWDOWN_PERCENT: float = 25.0
+    BLOCK_SIGNAL_ON_NEWS_FETCH_FAILURE: bool = True
 
     # Backtesting
     MIN_BACKTEST_TRADES: int = 100
@@ -125,6 +130,27 @@ class Settings(BaseSettings):
     class Config:
         env_file = (".env", "../../.env")
         case_sensitive = True
+
+    @model_validator(mode="after")
+    def validate_production_secrets(self):
+        if self.APP_ENV.strip().lower() != "production":
+            return self
+
+        placeholders = (
+            "change_me",
+            "changeme",
+            "placeholder",
+            "generate",
+            "default",
+        )
+        for field_name in ("JWT_SECRET", "ENCRYPTION_KEY"):
+            value = str(getattr(self, field_name, "") or "").strip()
+            lowered = value.lower()
+            if len(value) < 32 or any(marker in lowered for marker in placeholders):
+                raise ValueError(
+                    f"{field_name} must be set to a unique random secret of at least 32 characters in production."
+                )
+        return self
 
     @property
     def allowed_origins_list(self) -> List[str]:

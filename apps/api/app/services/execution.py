@@ -523,10 +523,14 @@ def execute_signal_trade(
             open_trade_count=open_trade_count,
             daily_realized_pnl=daily_loss,
             equity=equity,
+            balance=metrics.balance,
             free_margin=free_margin,
+            current_margin=metrics.margin,
             required_margin=float(margin_result.get("requiredMargin") or 0.0),
             free_margin_after_trade=float(margin_result.get("freeMarginAfterTrade") or free_margin),
             effective_risk_percent=effective_risk_percent,
+            symbol=broker_symbol,
+            symbol_point=spec.tick_size,
             is_jump_in=is_jump_in,
         )
         if not risk_result.approved:
