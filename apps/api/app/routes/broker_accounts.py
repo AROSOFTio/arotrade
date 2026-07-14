@@ -68,7 +68,7 @@ async def list_broker_accounts(
             remote = metaapi.get_account(account.metaapi_account_id)
         except metaapi.MetaApiError:
             continue
-    state = metaapi.account_state(remote) or ""
+        state = metaapi.account_state(remote) or ""
         connection = (remote.get("connectionStatus") or "").lower()
         has_updates = _apply_remote_state(account, remote) or has_updates
         if state == "deployed" and connection == "connected":
