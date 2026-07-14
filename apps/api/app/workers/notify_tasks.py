@@ -171,6 +171,37 @@ def check_entry_zones(self):
                             is_jump_in=False,
                         )
                     except Exception as e:
+                        reason = str(e)
+                        signal.blocked_reason = reason
+                        signal.lifecycle_status = models.SignalLifecycleStatus.BLOCKED.value
+                        db.add(models.ExecutionAudit(
+                            user_id=signal.user_id,
+                            signal_id=signal.id,
+                            trade_id=None,
+                            broker="metaapi" if signal.execution_mode in ("broker_demo", "live") else "paper",
+                            mode=signal.execution_mode,
+                            outcome="failed",
+                            reason=reason,
+                            details={
+                                "source": "entry_zone_monitor",
+                                "broker_account_id": signal.broker_account_id,
+                                "broker_symbol": signal.broker_symbol,
+                                "entry_min": signal.entry_min,
+                                "entry_max": signal.entry_max,
+                                "latest_price": mid,
+                            },
+                        ))
+                        create_notification(
+                            db,
+                            user_id=signal.user_id,
+                            title=f"Execution blocked: {signal.signal_type.upper()} {signal.symbol}",
+                            body=(
+                                f"{signal.symbol} {signal.timeframe} {signal.signal_type.upper()} "
+                                f"hit the entry zone, but order execution was blocked: {reason}"
+                            ),
+                            category="signal",
+                            link=f"/dashboard/signals?signal={signal.id}",
+                        )
                         logger.error("Auto-execution of signal %d failed: %s", signal.id, e)
 
         db.commit()

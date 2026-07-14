@@ -333,9 +333,15 @@ def spec_from_metaapi_specification(spec_dict: dict, quote: dict | None = None) 
     """Build a SizingSpec from raw MetaApi symbol specification and quote data."""
     quote = quote or {}
     try:
+        loss_tick_value = (
+            spec_dict.get("lossTickValue")
+            or spec_dict.get("lossTickvalue")
+            or quote.get("lossTickValue")
+            or quote.get("lossTickvalue")
+        )
         return SizingSpec(
             tick_size=float(spec_dict.get("tickSize") or 0),
-            loss_tick_value=float(spec_dict.get("lossTickValue") or 0),
+            loss_tick_value=float(loss_tick_value or 0),
             volume_min=float(spec_dict.get("minVolume") or spec_dict.get("volumeMin") or 0),
             volume_max=float(spec_dict.get("maxVolume") or spec_dict.get("volumeMax") or 0),
             volume_step=float(spec_dict.get("volumeStep") or 0),
