@@ -41,19 +41,30 @@ def expire_stale_signals(self):
         )
 
         for signal in expiring:
+            was_blocked = signal.lifecycle_status == models.SignalLifecycleStatus.BLOCKED.value
             signal.status = models.SignalStatus.EXPIRED
             signal.expired_at = now
-            if hasattr(signal, "lifecycle_status"):
+            if hasattr(signal, "lifecycle_status") and not was_blocked:
                 signal.lifecycle_status = models.SignalLifecycleStatus.EXPIRED.value
+
+            if was_blocked and signal.blocked_reason:
+                title = f"Signal expired after blocked execution: {signal.signal_type.upper()} {signal.symbol}"
+                body = (
+                    f"{signal.symbol} {signal.timeframe} {signal.signal_type.upper()} signal "
+                    f"expired after execution was blocked: {signal.blocked_reason}"
+                )
+            else:
+                title = f"Signal expired: {signal.signal_type.upper()} {signal.symbol}"
+                body = (
+                    f"{signal.symbol} {signal.timeframe} {signal.signal_type.upper()} signal "
+                    f"has expired without being triggered. Entry zone was no longer valid."
+                )
 
             create_notification(
                 db,
                 user_id=signal.user_id,
-                title=f"Signal expired: {signal.signal_type.upper()} {signal.symbol}",
-                body=(
-                    f"{signal.symbol} {signal.timeframe} {signal.signal_type.upper()} signal "
-                    f"has expired without being triggered. Entry zone was no longer valid."
-                ),
+                title=title,
+                body=body,
                 category="signal",
                 link=f"/dashboard/signals?signal={signal.id}",
             )
@@ -162,6 +173,8 @@ def check_entry_zones(self):
                     from app.services.execution import execute_signal_trade
                     try:
                         logger.info("Auto-executing approved signal %d entering zone", signal.id)
+                        signal.execution_started_at = now
+                        signal.lifecycle_status = models.SignalLifecycleStatus.EXECUTION_PENDING.value
                         execute_signal_trade(
                             db,
                             user_id=signal.user_id,
