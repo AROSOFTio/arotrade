@@ -436,19 +436,25 @@ def _generate_with_provider(provider: str, parts: list, *, json_response: bool =
         return _gemini_generate(parts, json_response=json_response)
     raise AIProviderError(f"Unsupported AI provider: {provider}")
 
+def _fallback_error(errors: list[tuple[str, Exception]]) -> AIProviderError:
+    if not errors:
+        return AIProviderError("All AI providers failed")
+    details = "; ".join(f"{provider}: {exc}" for provider, exc in errors)
+    return AIProviderError(f"All configured AI providers failed ({details})")
+
 def _generate_with_fallback(parts: list, *, json_response: bool = True) -> str:
     providers = _provider_order()
     if not providers:
         raise AIProviderNotConfigured("No AI provider API key is configured")
 
-    last_error: Optional[Exception] = None
+    errors: list[tuple[str, Exception]] = []
     for provider in providers:
         try:
             return _generate_with_provider(provider, parts, json_response=json_response)
         except AIProviderError as exc:
-            last_error = exc
+            errors.append((provider, exc))
             continue
-    raise AIProviderError(str(last_error) if last_error else "All AI providers failed")
+    raise _fallback_error(errors)
 
 
 def analyze_json(prompt: str, *, temperature: float = 0.3) -> dict:
@@ -457,15 +463,15 @@ def analyze_json(prompt: str, *, temperature: float = 0.3) -> dict:
     if not providers:
         raise AIProviderNotConfigured("No AI provider API key is configured")
 
-    last_error: Optional[Exception] = None
+    errors: list[tuple[str, Exception]] = []
     for provider in providers:
         try:
             raw = _generate_with_provider(provider, [prompt], json_response=True)
             return _json_from_text(raw)
         except AIProviderError as exc:
-            last_error = exc
+            errors.append((provider, exc))
             continue
-    raise AIProviderError(str(last_error) if last_error else "All AI providers failed")
+    raise _fallback_error(errors)
 
 def answer_analysis_question(analysis_summary: str, history: list[dict], question: str) -> str:
     transcript = ""
@@ -499,13 +505,13 @@ def run_chart_analysis(
     if not providers:
         raise AIProviderNotConfigured("No AI provider API key is configured")
 
-    last_error: Optional[Exception] = None
+    errors: list[tuple[str, Exception]] = []
     for provider in providers:
         try:
             raw = _generate_with_provider(provider, parts, json_response=True)
             data = _json_from_text(raw)
             return _validate_analysis(data, image_bytes=image_bytes, price_context=price_context)
         except AIProviderError as exc:
-            last_error = exc
+            errors.append((provider, exc))
             continue
-    raise AIProviderError(str(last_error) if last_error else "All AI providers failed")
+    raise _fallback_error(errors)
