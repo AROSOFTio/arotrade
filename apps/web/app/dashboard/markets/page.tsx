@@ -41,6 +41,19 @@ type Sotd = {
   take_profit_1?: number | null
   reasoning: string[]
 }
+type BrokerPosition = {
+  id?: string
+  positionId?: string
+  ticket?: string | number
+  symbol?: string
+  type?: string
+  side?: string
+  volume?: number
+  openPrice?: number
+  currentPrice?: number
+  profit?: number
+  unrealizedProfit?: number
+}
 type ManualOrderPreview = {
   broker_symbol: string
   direction: string
@@ -99,6 +112,7 @@ export default function MarketsPage() {
   const [sotdUpdatedAt, setSotdUpdatedAt] = useState<Date | null>(null)
   const [error, setError] = useState('')
   const [chartMessage, setChartMessage] = useState('')
+  const [chartReady, setChartReady] = useState(false)
   const [accountsLoading, setAccountsLoading] = useState(true)
   const chartContainerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
@@ -121,6 +135,9 @@ export default function MarketsPage() {
   const [quoteAge, setQuoteAge] = useState<number | null>(null)
   const [staleWarning, setStaleWarning] = useState(false)
   const [wsPrice, setWsPrice] = useState<{ bid: number; ask: number; spread: number } | null>(null)
+  const [positions, setPositions] = useState<BrokerPosition[]>([])
+  const [positionsLoading, setPositionsLoading] = useState(false)
+  const [positionsError, setPositionsError] = useState('')
 
   // Real-time WebSocket quote stream
   useEffect(() => {
@@ -247,7 +264,10 @@ export default function MarketsPage() {
   // Chart lifecycle
   useEffect(() => {
     const container = chartContainerRef.current
-    if (!container) return
+    if (!container) {
+      setChartReady(false)
+      return
+    }
 
     const themeOptions = (dark: boolean) => ({
       layout: {
@@ -276,6 +296,7 @@ export default function MarketsPage() {
     })
     chartRef.current = chart
     seriesRef.current = series
+    setChartReady(true)
 
     const onResize = () => chart.applyOptions({ width: container.clientWidth, height: chartHeight() })
     const onTheme = () => chart.applyOptions(themeOptions(isDark()))
@@ -288,12 +309,18 @@ export default function MarketsPage() {
       chart.remove()
       chartRef.current = null
       seriesRef.current = null
+      setChartReady(false)
     }
-  }, [])
+  }, [accountsLoading])
 
   const loadCandles = useCallback(async () => {
     if (!selectedAccountId || !selectedSymbol) return
+    if (!chartReady || !seriesRef.current || !chartRef.current) {
+      setChartMessage('Preparing chart...')
+      return
+    }
     try {
+      setChartMessage('Loading candles...')
       const response = await apiRequest<{ candles: Candle[] }>(
         `/market/accounts/${selectedAccountId}/symbols/${selectedSymbol.broker_symbol}/candles?timeframe=${timeframe}&count=300`
       )
@@ -308,9 +335,10 @@ export default function MarketsPage() {
       setChartMessage(chartData.length ? '' : 'No candle data returned for this symbol/timeframe.')
       setError('')
     } catch (requestError) {
+      setChartMessage('Could not load candles for this symbol/timeframe.')
       setError(errorMessage(requestError))
     }
-  }, [selectedAccountId, selectedSymbol, timeframe])
+  }, [chartReady, selectedAccountId, selectedSymbol, timeframe])
 
   const loadPrice = useCallback(() => {
     if (!selectedAccountId || !selectedSymbol) return
@@ -339,7 +367,7 @@ export default function MarketsPage() {
   }, [selectedSymbol])
 
   useEffect(() => {
-    if (!selectedAccountId || !selectedSymbol) return
+    if (!selectedAccountId || !selectedSymbol || !chartReady) return
     void loadCandles()
     loadPrice()
     setImpact(null)
@@ -352,7 +380,7 @@ export default function MarketsPage() {
       window.clearInterval(candleInterval)
       window.clearInterval(newsInterval)
     }
-  }, [loadCandles, loadPrice, loadNews, selectedAccountId, selectedSymbol])
+  }, [chartReady, loadCandles, loadPrice, loadNews, selectedAccountId, selectedSymbol])
 
   const analyzeNews = useCallback(async () => {
     if (!selectedSymbol) return
@@ -404,6 +432,27 @@ export default function MarketsPage() {
     localStorage.setItem('arotrade:selected_account_id', String(id))
   }
 
+
+  const loadPositions = useCallback(async () => {
+    if (!selectedAccountId) return
+    setPositionsLoading(true)
+    setPositionsError('')
+    try {
+      const response = await apiRequest<{ positions: BrokerPosition[] }>(`/market/accounts/${selectedAccountId}/positions`)
+      setPositions(Array.isArray(response.positions) ? response.positions : [])
+    } catch (requestError) {
+      setPositionsError(errorMessage(requestError))
+    } finally {
+      setPositionsLoading(false)
+    }
+  }, [selectedAccountId])
+
+  useEffect(() => {
+    if (!selectedAccountId) return
+    void loadPositions()
+    const interval = window.setInterval(() => void loadPositions(), 15000)
+    return () => window.clearInterval(interval)
+  }, [loadPositions, selectedAccountId])
   const handlePreview = async () => {
     if (!selectedAccountId || !selectedSymbol || !slInput) {
       setPreviewError('Select account, symbol, and enter a stop loss.')
@@ -598,7 +647,7 @@ export default function MarketsPage() {
             )}
           </div>
           <div className="relative">
-            <div ref={chartContainerRef} className="w-full" />
+            <div ref={chartContainerRef} className="min-h-[300px] w-full sm:min-h-[420px]" />
             {chartMessage && (
               <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-sm font-medium text-slate-500">
                 {chartMessage}
@@ -881,6 +930,60 @@ export default function MarketsPage() {
                 <p className="text-[11px] font-semibold text-green-800">✓ {executionSuccess}</p>
               </div>
             )}
+          </div>
+
+          <div className="card">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                <Activity size={15} className="text-[#15803d]" aria-hidden="true" /> Open positions
+              </h2>
+              <button
+                type="button"
+                disabled={positionsLoading}
+                onClick={() => void loadPositions()}
+                className="btn-secondary min-h-8 px-3 py-1 text-xs"
+              >
+                {positionsLoading ? 'Refreshing...' : 'Refresh'}
+              </button>
+            </div>
+            {positionsError && (
+              <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[11px] font-semibold text-red-700">{positionsError}</p>
+            )}
+            {positions.length === 0 ? (
+              <p className="mt-3 text-xs leading-5 text-slate-500">No open MT5 positions for this account.</p>
+            ) : (
+              <div className="mt-3 max-h-72 overflow-auto rounded-md border border-slate-200">
+                <table className="w-full text-left text-[11px]">
+                  <thead className="bg-slate-50 text-slate-500">
+                    <tr>
+                      <th className="px-3 py-2 font-semibold uppercase">Symbol</th>
+                      <th className="px-3 py-2 font-semibold uppercase">Side</th>
+                      <th className="px-3 py-2 font-semibold uppercase">Vol</th>
+                      <th className="px-3 py-2 font-semibold uppercase">P/L</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {positions.map((position, index) => {
+                      const profit = Number(position.profit ?? position.unrealizedProfit ?? 0)
+                      const side = String(position.type ?? position.side ?? '-').replace('POSITION_TYPE_', '')
+                      return (
+                        <tr key={String(position.id ?? position.positionId ?? position.ticket ?? index)}>
+                          <td className="px-3 py-2 font-semibold text-slate-900">{position.symbol ?? selectedSymbol?.broker_symbol ?? '-'}</td>
+                          <td className="px-3 py-2 uppercase text-slate-600">{side}</td>
+                          <td className="px-3 py-2 tabular-nums text-slate-700">{formatNumber(Number(position.volume ?? 0), 2)}</td>
+                          <td className={`px-3 py-2 font-bold tabular-nums ${profit >= 0 ? 'text-[#15803d]' : 'text-[#b91c1c]'}`}>
+                            {accountCurrency} {formatNumber(profit, 2)}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <p className="mt-3 text-[11px] leading-4 text-slate-400">
+              Entry is from this ticket. Use the trade management screen for close and partial-close until direct market-panel closing has confirmation controls.
+            </p>
           </div>
           <div className="card">
             <div className="flex items-center justify-between gap-3">
