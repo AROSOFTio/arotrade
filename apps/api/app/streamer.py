@@ -71,8 +71,46 @@ class MarketDataListener(SynchronizationListener):
 
     async def on_candles_updated(self, instance_index: str, candles):
         """Callback from MetaApi when candles update."""
-        # Optional: cache M1/H1 candles if needed, otherwise rely on REST API
-        pass
+        try:
+            if isinstance(candles, dict):
+                candidate = candles.get("candles") or candles.get("data") or candles.get("items") or candles
+                if isinstance(candidate, list):
+                    candle = candidate[-1] if candidate else None
+                else:
+                    candle = candidate
+            elif isinstance(candles, list):
+                candle = candles[-1] if candles else None
+            else:
+                candle = None
+
+            if not isinstance(candle, dict):
+                return
+
+            symbol = str(candle.get("symbol") or candle.get("brokerSymbol") or candle.get("broker_symbol") or "").upper()
+            time_value = candle.get("time") or candle.get("brokerTime") or candle.get("broker_time")
+            if not symbol or time_value is None:
+                return
+
+            candle_data = {
+                "symbol": symbol,
+                "broker_account_id": self.local_account_id,
+                "time": str(time_value),
+                "open": float(candle.get("open") or candle.get("openPrice") or 0.0),
+                "high": float(candle.get("high") or candle.get("highPrice") or 0.0),
+                "low": float(candle.get("low") or candle.get("lowPrice") or 0.0),
+                "close": float(candle.get("close") or candle.get("closePrice") or 0.0),
+                "volume": float(candle.get("volume") or 0.0) if candle.get("volume") is not None else None,
+                "cached_at": datetime.now(UTC).isoformat(),
+            }
+
+            redis_client.set(
+                f"mt5:candle:{self.local_account_id}:{symbol}",
+                json.dumps(candle_data),
+                ex=120,
+            )
+            redis_client.publish(f"channel:candles:{self.local_account_id}", json.dumps(candle_data))
+        except Exception as exc:
+            logger.error("Error in on_candles_updated for %s: %s", self.account_id, exc)
 
 
 def resolve_symbols_to_stream(db: Session, local_account: models.BrokerAccount) -> set[str]:
