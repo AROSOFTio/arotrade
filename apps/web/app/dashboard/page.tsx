@@ -68,7 +68,7 @@ export default function DashboardPage() {
 
   const activeSignals = signals.filter((signal) => ['pending', 'approved'].includes(signal.status)).length
   const openTrades = trades.filter((trade) => trade.status === 'open').length
-  const demoBalance = accounts.filter((account) => account.is_active).reduce((total, account) => total + account.balance, 0)
+  const activeBalance = accounts.filter((account) => account.is_active).reduce((total, account) => total + account.balance, 0)
 
   return (
     <>
@@ -93,9 +93,9 @@ export default function DashboardPage() {
           <p className="mt-2 text-xs text-slate-500">Approved signals can be checked for paper execution</p>
         </div>
         <div className="card">
-          <p className="text-xs font-semibold uppercase tracking-[0.06em] text-slate-500">Demo balance</p>
-          <p className="mt-2 text-3xl font-bold text-slate-950">{loading ? '—' : demoBalance ? `$${formatNumber(demoBalance)}` : 'Not set'}</p>
-          <p className="mt-2 text-xs text-slate-500">From active demo account records</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.06em] text-slate-500">Total balance</p>
+          <p className="mt-2 text-3xl font-bold text-slate-950">{loading ? '—' : activeBalance ? `$${formatNumber(activeBalance)}` : 'Not set'}</p>
+          <p className="mt-2 text-xs text-slate-500">From active connected broker accounts</p>
         </div>
         <div className="card">
           <p className="text-xs font-semibold uppercase tracking-[0.06em] text-slate-500">Risk per trade</p>

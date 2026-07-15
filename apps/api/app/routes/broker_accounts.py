@@ -72,6 +72,13 @@ async def list_broker_accounts(
         connection = (remote.get("connectionStatus") or "").lower()
         has_updates = _apply_remote_state(account, remote) or has_updates
         if state == "deployed" and connection == "connected":
+            try:
+                info = metaapi.get_account_information(account.metaapi_account_id)
+                account.balance = float(info.get("balance") or account.balance)
+                account.currency = (info.get("currency") or account.currency)[:3]
+                has_updates = True
+            except metaapi.MetaApiError:
+                pass
             sync_result = sync_broker_symbols_for_account(db, account)
             has_updates = has_updates or sync_result.synced > 0
 

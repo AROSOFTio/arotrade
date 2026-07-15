@@ -236,30 +236,37 @@ export default function MarketsPage() {
       .finally(() => setAccountsLoading(false))
   }, [])
 
-  useEffect(() => {
+  const loadAccountState = useCallback(async () => {
     if (!selectedAccountId) return
-    apiRequest<BrokerAccount>(`/broker-accounts/${selectedAccountId}/state`)
-      .then((updated) => {
-        setAccounts((current) => current.map((account) => account.id === updated.id ? updated : account))
-      })
-      .catch(() => undefined)
+    try {
+      const updated = await apiRequest<BrokerAccount>(`/broker-accounts/${selectedAccountId}/state`)
+      setAccounts((current) => current.map((account) => account.id === updated.id ? updated : account))
+    } catch (err) {
+      // Keep the page running even if balance refresh fails.
+      setError(errorMessage(err))
+    }
   }, [selectedAccountId])
 
-  // 2. Fetch symbols once account is selected
+  const loadSymbols = useCallback(async () => {
+    if (!selectedAccountId) return
+    try {
+      const r = await apiRequest<{ symbols: SymbolItem[] }>(`/market/accounts/${selectedAccountId}/symbols`)
+      setSymbols(r.symbols)
+      if (r.symbols.length > 0) {
+        setSelectedSymbol(r.symbols[0])
+      } else {
+        setSelectedSymbol(null)
+      }
+    } catch (err) {
+      setError(errorMessage(err))
+    }
+  }, [selectedAccountId])
 
   useEffect(() => {
     if (!selectedAccountId) return
-    apiRequest<{ symbols: SymbolItem[] }>(`/market/accounts/${selectedAccountId}/symbols`)
-      .then((r) => {
-        setSymbols(r.symbols)
-        if (r.symbols.length > 0) {
-          setSelectedSymbol(r.symbols[0])
-        } else {
-          setSelectedSymbol(null)
-        }
-      })
-      .catch((err) => setError(errorMessage(err)))
-  }, [selectedAccountId])
+    void loadAccountState()
+    void loadSymbols()
+  }, [selectedAccountId, loadAccountState, loadSymbols])
 
   // Chart lifecycle
   useEffect(() => {
@@ -457,9 +464,12 @@ export default function MarketsPage() {
   useEffect(() => {
     if (!selectedAccountId) return
     void loadPositions()
-    const interval = window.setInterval(() => void loadPositions(), 15000)
+    const interval = window.setInterval(() => {
+      void loadPositions()
+      void loadAccountState()
+    }, 15000)
     return () => window.clearInterval(interval)
-  }, [loadPositions, selectedAccountId])
+  }, [loadPositions, loadAccountState, selectedAccountId])
   const handlePreview = async () => {
     if (!selectedAccountId || !selectedSymbol || !slInput) {
       setPreviewError('Select account, symbol, and enter a stop loss.')
@@ -531,6 +541,8 @@ export default function MarketsPage() {
       setExecutionSuccess(`Order executed successfully! Position ID: ${res.broker_position_id || res.id}`)
       setPreviewData(null)
       setShowConfirmModal(false)
+      void loadPositions()
+      void loadAccountState()
     } catch (e) {
       setError(errorMessage(e))
       setShowConfirmModal(false)
@@ -980,6 +992,14 @@ export default function MarketsPage() {
                           <td className="px-3 py-2 tabular-nums text-slate-700">{formatNumber(Number(position.volume ?? 0), 2)}</td>
                           <td className={`px-3 py-2 font-bold tabular-nums ${profit >= 0 ? 'text-[#15803d]' : 'text-[#b91c1c]'}`}>
                             {accountCurrency} {formatNumber(profit, 2)}
+                          </td>
+                          <td className="px-3 py-2">
+                            <a
+                              href="/dashboard/trades"
+                              className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-200"
+                            >
+                              Manage
+                            </a>
                           </td>
                         </tr>
                       )
