@@ -432,6 +432,13 @@ export default function MarketsPage() {
     localStorage.setItem('arotrade:selected_account_id', String(id))
   }
 
+  useEffect(() => {
+    setPreviewData(null)
+    setPreviewError('')
+    setExecutionSuccess('')
+    setShowConfirmModal(false)
+  }, [selectedAccountId, selectedSymbol?.broker_symbol, tradeDirection, sizingMode, volumeInput, riskPercentInput, slInput, tpInput])
+
 
   const loadPositions = useCallback(async () => {
     if (!selectedAccountId) return

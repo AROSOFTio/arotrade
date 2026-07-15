@@ -625,8 +625,9 @@ def place_market_order(
     }
     if take_profit:
         payload["takeProfit"] = take_profit
-    if client_id:
-        payload["clientId"] = client_id
+    # MetaApi's REST trade schema rejects unknown fields with a generic
+    # "Validation failed" response. Keep client_id internal and rely on the
+    # short comment for reconciliation, which is supported by the trade API.
 
     response = _request(
         "POST",
