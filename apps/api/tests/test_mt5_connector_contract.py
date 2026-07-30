@@ -13,8 +13,8 @@ class MT5ConnectorContractTests(unittest.TestCase):
         sources = [path.read_text(encoding="utf-8") for path in copies]
 
         self.assertTrue(all(source == sources[0] for source in sources[1:]))
-        self.assertIn("data[bytes - 1] == 0", sources[0])
-        self.assertIn("ArrayResize(data, bytes - 1)", sources[0])
+        self.assertIn("StringLen(payload), CP_UTF8", sources[0])
+        self.assertNotIn("StringToCharArray(payload, data, 0, WHOLE_ARRAY", sources[0])
 
 
 if __name__ == "__main__":
