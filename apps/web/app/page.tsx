@@ -136,7 +136,7 @@ export default function HomePage() {
       <footer className="border-t border-slate-200 bg-white">
         <div className="mx-auto w-full max-w-6xl px-4 py-8 text-xs leading-5 text-slate-500 sm:px-6">
           <p>Trading involves substantial risk of loss. AroPilot provides trading intelligence and risk tooling; it does not provide financial advice or guarantee outcomes.</p>
-          <p className="mt-3">© {new Date().getFullYear()} AROFi. All rights reserved.</p>
+          <p className="mt-3">(c) {new Date().getFullYear()} AROFi. All rights reserved.</p>
         </div>
       </footer>
     </main>
