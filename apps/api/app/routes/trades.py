@@ -1,11 +1,85 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from datetime import datetime
+from uuid import uuid4
 from app import models, schemas
 from app.database import get_db
 from app.config import settings
+from app.services.mt5_bridge.store import get_account_snapshot
 
 router = APIRouter()
+
+
+def _is_direct_mt5(account: models.BrokerAccount | None) -> bool:
+    return bool(account and (account.broker == "direct-mt5" or account.connection_state == "direct_connected"))
+
+
+def _position_ticket_from_snapshot(account_id: int, trade: models.Trade) -> str | None:
+    snapshot = get_account_snapshot(account_id) or {}
+    positions = snapshot.get("positions") if isinstance(snapshot.get("positions"), list) else []
+    for position in positions:
+        if not isinstance(position, dict):
+            continue
+        if str(position.get("ticket") or "") in {str(trade.broker_position_id or ""), str(trade.broker_order_id or "")}:
+            return str(position.get("ticket"))
+    matching = [
+        position for position in positions
+        if isinstance(position, dict)
+        and str(position.get("symbol") or "").upper() == str(trade.broker_symbol or trade.symbol).upper()
+        and str(position.get("type") or "").lower() == str(trade.trade_type).lower()
+    ]
+    if len(matching) == 1:
+        return str(matching[0].get("ticket"))
+    return str(trade.broker_position_id or trade.broker_order_id or "") or None
+
+
+def _queue_direct_position_command(
+    db: Session,
+    *,
+    trade: models.Trade,
+    account: models.BrokerAccount,
+    action: str,
+    payload: dict,
+    execution_status: str,
+) -> models.Trade:
+    client_order_id = f"mt5-{uuid4()}"
+    command = {
+        "command_id": client_order_id,
+        "action": action,
+        "symbol": (trade.broker_symbol or trade.symbol).upper(),
+        **payload,
+    }
+    intent = models.ExecutionIntent(
+        user_id=trade.user_id,
+        signal_id=None,
+        broker_account_id=account.id,
+        execution_mode=trade.execution_mode or ("live" if getattr(account.account_type, "value", account.account_type) == "live" else "broker_demo"),
+        idempotency_key=client_order_id,
+        client_order_id=client_order_id,
+        requested_volume=payload.get("volume"),
+        requested_price=trade.entry_price,
+        request_payload=command,
+        status="QUEUED_DIRECT_MT5",
+        execution_state="QUEUED",
+    )
+    db.add(intent)
+    db.flush()
+    trade.execution_intent_id = intent.id
+    trade.execution_status = execution_status
+    trade.execution_error = None
+    trade.reconciliation_status = "pending"
+    db.add(models.ExecutionAudit(
+        user_id=trade.user_id,
+        trade_id=trade.id,
+        broker="direct-mt5",
+        mode=trade.execution_mode or "broker_demo",
+        outcome="queued",
+        reason=f"Queued direct MT5 {action}",
+        details=command,
+    ))
+    db.commit()
+    db.refresh(trade)
+    return trade
 
 
 @router.post("/execute", response_model=schemas.TradeResponse)
@@ -94,6 +168,18 @@ async def close_trade(
         account = db.query(models.BrokerAccount).filter(
             models.BrokerAccount.id == trade.broker_account_id
         ).first()
+        if _is_direct_mt5(account):
+            position_ticket = _position_ticket_from_snapshot(account.id, trade)
+            if not position_ticket:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No matching MT5 position ticket found in the EA snapshot")
+            return _queue_direct_position_command(
+                db,
+                trade=trade,
+                account=account,
+                action="close_position",
+                payload={"position_ticket": position_ticket},
+                execution_status="queued_direct_mt5_close",
+            )
         if not account or not account.metaapi_account_id:
             raise HTTPException(status_code=400, detail="Broker account mapping missing")
 
@@ -192,6 +278,22 @@ async def modify_trade_protection(
         account = db.query(models.BrokerAccount).filter(
             models.BrokerAccount.id == trade.broker_account_id
         ).first()
+        if _is_direct_mt5(account):
+            position_ticket = _position_ticket_from_snapshot(account.id, trade)
+            if not position_ticket:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No matching MT5 position ticket found in the EA snapshot")
+            return _queue_direct_position_command(
+                db,
+                trade=trade,
+                account=account,
+                action="modify_position",
+                payload={
+                    "position_ticket": position_ticket,
+                    "stop_loss": body.stop_loss if body.stop_loss is not None else trade.stop_loss,
+                    "take_profit": body.take_profit if body.take_profit is not None else trade.take_profit,
+                },
+                execution_status="queued_direct_mt5_modify",
+            )
         if not account or not account.metaapi_account_id:
             raise HTTPException(status_code=400, detail="Broker account not connected")
         if not trade.broker_position_id:
@@ -245,6 +347,20 @@ async def partial_close_trade(
     account = db.query(models.BrokerAccount).filter(
         models.BrokerAccount.id == trade.broker_account_id
     ).first()
+    if _is_direct_mt5(account):
+        position_ticket = _position_ticket_from_snapshot(account.id, trade)
+        if not position_ticket:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No matching MT5 position ticket found in the EA snapshot")
+        current_volume = float(trade.actual_volume or trade.volume or 0)
+        remaining = max(0.0, current_volume - float(body.volume))
+        return _queue_direct_position_command(
+            db,
+            trade=trade,
+            account=account,
+            action="partial_close",
+            payload={"position_ticket": position_ticket, "volume": float(body.volume), "remaining_volume": remaining},
+            execution_status="queued_direct_mt5_partial_close",
+        )
     if not account or not account.metaapi_account_id:
         raise HTTPException(status_code=400, detail="Broker account not connected")
 

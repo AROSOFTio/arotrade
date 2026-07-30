@@ -5,6 +5,7 @@ from fastapi.routing import APIRoute
 from sqlalchemy.orm import Session
 from app import models
 from app.database import get_db
+from app.services.chart_analysis import engine as chart_analysis_engine
 from app.services.mt5_bridge.store import (
     get_candles,
     require_bridge_account,
@@ -63,6 +64,31 @@ def _analysis_to_chart_objects(analysis: models.AIAnalysis) -> list[dict]:
     if analysis.signal in ("buy", "sell") and entry and entry > 0:
         objects.append({"type": "arrow", "name": f"{analysis.signal}_signal", "direction": analysis.signal, "price": entry})
     return objects
+
+
+def _deterministic_chart_objects(account: models.BrokerAccount, symbol: str | None, timeframe: str | None) -> list[dict]:
+    if not symbol or not timeframe:
+        return []
+    candles = get_candles(account.id, symbol, timeframe, 300)
+    if len(candles) < 50:
+        return []
+    try:
+        analysis = chart_analysis_engine.analyze_chart(
+            symbol=symbol.upper(),
+            broker_symbol=symbol.upper(),
+            timeframe=timeframe.upper(),
+            candles=candles,
+            include="all",
+        )
+    except Exception:
+        return []
+    return [
+        drawing.model_dump(mode="json")
+        for drawing in analysis.drawings
+        if getattr(drawing, "enabled", True)
+    ][:80]
+
+
 def _latest_signal_command(db: Session, account: models.BrokerAccount) -> dict | None:
     signal = db.query(models.Signal).filter(
         models.Signal.user_id == account.user_id,
@@ -130,6 +156,7 @@ def _command_payload(intent: models.ExecutionIntent) -> dict:
         "volume": payload.get("volume"),
         "stop_loss": payload.get("stop_loss"),
         "take_profit": payload.get("take_profit") or 0,
+        "position_ticket": payload.get("position_ticket") or payload.get("position_id") or payload.get("broker_position_id"),
     }
 def _mark_direct_command_sent(db: Session, intent: models.ExecutionIntent) -> None:
     intent.status = "SENT_TO_MT5"
@@ -220,6 +247,9 @@ async def bridge_commands(
     account = require_bridge_account(db, x_aropilot_key, account_id)
     signal = _latest_signal_command(db, account)
     analysis = _latest_analysis_command(db, account, symbol, timeframe)
+    chart_objects = _deterministic_chart_objects(account, symbol, timeframe)
+    if not chart_objects and analysis:
+        chart_objects = analysis.get("chart_objects", [])
     pending = _pending_direct_mt5_command(db, account)
     command = _command_payload(pending) if pending else None
     response = {
@@ -235,7 +265,7 @@ async def bridge_commands(
         "market_summary": analysis,
         "signal": signal,
         "notifications": [],
-        "chart_objects": analysis.get("chart_objects", []) if analysis else [],
+        "chart_objects": chart_objects,
         "commands": [command] if command else [],
     }
     if command:
@@ -264,21 +294,46 @@ async def bridge_command_result(
     intent.error = None if success else str(payload.get("message") or "MT5 command rejected")
     intent.broker_order_id = str(payload.get("order_ticket") or "") or None
     intent.broker_deal_id = str(payload.get("deal_ticket") or "") or None
+    if payload.get("position_ticket"):
+        intent.broker_position_id = str(payload.get("position_ticket"))
     intent.status = "FILLED" if success else "REJECTED"
     intent.execution_state = "FILLED" if success else "REJECTED"
     trade = db.query(models.Trade).filter(models.Trade.execution_intent_id == intent.id).first()
     if trade:
+        request_payload = intent.request_payload if isinstance(intent.request_payload, dict) else {}
+        action = str(request_payload.get("action") or "open_trade")
         trade.broker_order_id = intent.broker_order_id
         trade.broker_deal_id = intent.broker_deal_id
         trade.execution_error = intent.error
         if success:
-            trade.status = models.TradeStatus.OPEN
-            trade.execution_status = "filled"
-            trade.filled_at = datetime.utcnow()
-            trade.opened_time = trade.filled_at
-            trade.actual_fill_price = trade.requested_price
+            if action == "open_trade":
+                trade.status = models.TradeStatus.OPEN
+                trade.execution_status = "filled"
+                trade.filled_at = datetime.utcnow()
+                trade.opened_time = trade.filled_at
+                trade.actual_fill_price = trade.requested_price
+                if intent.broker_position_id:
+                    trade.broker_position_id = intent.broker_position_id
+            elif action == "modify_position":
+                if request_payload.get("stop_loss") is not None:
+                    trade.stop_loss = float(request_payload["stop_loss"])
+                if request_payload.get("take_profit") is not None:
+                    trade.take_profit = float(request_payload["take_profit"])
+                trade.execution_status = "protection_modified"
+                trade.reconciliation_status = "modified"
+            elif action == "close_position":
+                trade.status = models.TradeStatus.CLOSED
+                trade.execution_status = "closed"
+                trade.exit_time = datetime.utcnow()
+                trade.closed_time = trade.exit_time
+            elif action == "partial_close":
+                trade.execution_status = "partially_closed"
+                trade.reconciliation_status = "partially_reconciled"
+                if request_payload.get("remaining_volume") is not None:
+                    trade.actual_volume = float(request_payload["remaining_volume"])
         else:
-            trade.status = models.TradeStatus.CANCELLED
+            if action == "open_trade":
+                trade.status = models.TradeStatus.CANCELLED
             trade.execution_status = "rejected"
     db.commit()
     return {"status": "recorded", "command_id": command_id, "success": success}

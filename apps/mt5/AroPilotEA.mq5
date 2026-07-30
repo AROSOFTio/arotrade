@@ -62,6 +62,7 @@ void PollCommands()
    if(!HttpGet(url, ApiKey, response)) return;
    DrawAnalysisFromJson(response);
    string commandId = JsonStringValue(response, "command_id", "");
+   ulong positionTicket = (ulong)JsonNumberValue(response, "position_ticket", 0.0);
    ulong orderTicket = 0;
    ulong dealTicket = 0;
    int retcode = 0;
@@ -74,6 +75,7 @@ void PollCommands()
          + "\"command_id\":\"" + JsonEscape(commandId) + "\","
          + "\"success\":" + (executed ? "true" : "false") + ","
          + "\"order_ticket\":" + IntegerToString((long)orderTicket) + ","
+         + "\"position_ticket\":" + IntegerToString((long)positionTicket) + ","
          + "\"deal_ticket\":" + IntegerToString((long)dealTicket) + ","
          + "\"retcode\":" + IntegerToString(retcode) + ","
          + "\"message\":\"" + JsonEscape(message) + "\""

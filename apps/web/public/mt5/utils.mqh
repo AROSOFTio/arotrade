@@ -34,6 +34,16 @@ string TfToText(ENUM_TIMEFRAMES tf)
    }
 }
 
+datetime IsoToTime(string value)
+{
+   string text = value;
+   StringReplace(text, "T", " ");
+   StringReplace(text, "Z", "");
+   int dot = StringFind(text, ".");
+   if(dot >= 0) text = StringSubstr(text, 0, dot);
+   return StringToTime(text);
+}
+
 string JsonStringValue(string json, string key, string fallback="")
 {
    string pattern = "\"" + key + "\":";
