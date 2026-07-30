@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { Copy, Download, Landmark, Link2, PlugZap, Power, RefreshCw, Rocket, RotateCcw, Square, Trash2 } from 'lucide-react'
+import { Copy, Download, Landmark, Link2, PlugZap, RefreshCw, Rocket, Square, Trash2 } from 'lucide-react'
 
 import { apiRequest, errorMessage, formatDate, formatNumber } from '../../components/api'
 import { EmptyState } from '../../components/empty-state'
@@ -120,7 +120,7 @@ export default function BrokerAccountsPage() {
       }, 50)
     } catch (requestError) { setError(errorMessage(requestError)) } finally { setBusyId(null) }
   }
-  const accountAction = async (accountId: number, action: 'deploy' | 'undeploy' | 'state' | 'deactivate' | 'reactivate') => {
+  const accountAction = async (accountId: number, action: 'deploy' | 'undeploy' | 'state') => {
     setError('')
     setMessage('')
     setBusyId(accountId)
@@ -131,8 +131,6 @@ export default function BrokerAccountsPage() {
       if (action === 'deploy') setMessage('Deploying — the broker connection usually takes 1–3 minutes. Use Refresh to check.')
       if (action === 'undeploy') setMessage('Undeploying — hourly billing stops once undeployed.')
       if (action === 'state') setMessage('State refreshed.')
-      if (action === 'deactivate') setMessage('Account deactivated. Any hosted adapter is being undeployed.')
-      if (action === 'reactivate') setMessage('Account reactivated.')
     } catch (requestError) { setError(errorMessage(requestError)) } finally { setBusyId(null) }
   }
 
@@ -154,7 +152,7 @@ export default function BrokerAccountsPage() {
       <PageHeader
         eyebrow="Brokers"
         title="Broker accounts"
-        description="Connect MetaTrader 5 through the AroPilot Expert Advisor. MetaApi remains available as an optional advanced broker adapter."
+        description="Connect MetaTrader 5 through the AroPilot Expert Advisor. Direct MT5 is the primary live bridge."
       />
       {(error || message) && <div className={`mb-5 rounded-md border px-4 py-3 text-sm ${error ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>{error || message}</div>}
       <section className="grid gap-6 xl:grid-cols-[minmax(340px,0.7fr)_minmax(0,1.3fr)]">
@@ -203,7 +201,7 @@ export default function BrokerAccountsPage() {
               <button type="button" className="mt-3 inline-flex items-center gap-2 text-xs font-bold text-emerald-800" onClick={() => void navigator.clipboard?.writeText(`BridgeUrl=${bridgeEndpoint}\nAccountId=${bridgeAccountId}\nApiKey=${bridgeKey}`)}><Copy size={13} /> Copy inputs</button>
             </div>}
           </form>
-          <form onSubmit={connectMt5} className="card h-fit">
+          <form onSubmit={connectMt5} className="hidden card h-fit" aria-hidden="true">
           <div className="flex items-center gap-2">
             <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-[#2563eb]"><Link2 size={18} aria-hidden="true" /></span>
             <div>
@@ -254,7 +252,7 @@ export default function BrokerAccountsPage() {
         <div className="card overflow-hidden p-0">
           <div className="border-b border-slate-200 px-5 py-4">
             <h2 className="text-sm font-semibold text-slate-900">Connected accounts</h2>
-            <p className="mt-1 text-xs text-slate-500">Direct MT5 bridge is primary. Optional MetaApi adapters can be deployed or undeployed from this list.</p>
+            <p className="mt-1 text-xs text-slate-500">Direct MT5 bridge is primary. Use Show EA inputs to recover the MT5 connector values anytime.</p>
           </div>
           {loading ? <div className="p-8 text-sm text-slate-500">Loading accounts…</div> : accounts.length ? (
             <div className="divide-y divide-slate-100">
@@ -269,12 +267,7 @@ export default function BrokerAccountsPage() {
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     {!account.is_active ? (
-                      <>
-                        <StatusBadge value="inactive" />
-                        <button type="button" disabled={busyId === account.id} onClick={() => void accountAction(account.id, 'reactivate')} className="btn-secondary min-h-8 px-3 py-1 text-xs">
-                          <RotateCcw size={13} aria-hidden="true" /> Reactivate
-                        </button>
-                      </>
+                      <StatusBadge value="inactive" />
                     ) : account.broker === 'direct-mt5' ? (
                       <>
                         <span className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${stateTone(account.connection_state)}`}>{account.connection_state || 'waiting_for_ea'}</span>
@@ -300,11 +293,6 @@ export default function BrokerAccountsPage() {
                       </>
                     ) : (
                       <StatusBadge value={account.is_active ? 'active' : 'inactive'} />
-                    )}
-                    {account.is_active && (
-                      <button type="button" disabled={busyId === account.id} onClick={() => void accountAction(account.id, 'deactivate')} className="btn-secondary min-h-8 px-3 py-1 text-xs">
-                        <Power size={13} aria-hidden="true" /> Deactivate
-                      </button>
                     )}
                     <button type="button" disabled={busyId === account.id} onClick={() => void deleteAccount(account)} className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-red-200 bg-white px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-50">
                       <Trash2 size={13} aria-hidden="true" /> Delete

@@ -17,6 +17,7 @@ type BrokerAccount = {
   currency: string
   is_active: boolean
   connection_state?: string | null
+  metaapi_account_id?: string | null
 }
 
 type SymbolItem = {
@@ -245,6 +246,8 @@ export default function MarketsPage() {
 
   const loadAccountState = useCallback(async () => {
     if (!selectedAccountId) return
+    const selected = accounts.find((account) => account.id === selectedAccountId)
+    if (!selected?.metaapi_account_id) return
     try {
       const updated = await apiRequest<BrokerAccount>(`/broker-accounts/${selectedAccountId}/state`)
       setAccounts((current) => current.map((account) => account.id === updated.id ? updated : account))
@@ -252,7 +255,7 @@ export default function MarketsPage() {
       // Keep the page running even if balance refresh fails.
       setError(errorMessage(err))
     }
-  }, [selectedAccountId])
+  }, [accounts, selectedAccountId])
 
   const loadSymbols = useCallback(async () => {
     if (!selectedAccountId) return

@@ -397,48 +397,6 @@ async def list_account_symbols(
     return {"symbols": symbols}
 
 
-@router.post("/{account_id}/deactivate", response_model=schemas.BrokerAccountResponse)
-async def deactivate_broker_account(
-    account_id: int,
-    current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
-    db: Session = Depends(get_db),
-):
-    account = _get_user_account(account_id, current_user["user_id"], db)
-    if account.metaapi_account_id:
-        try:
-            remote = metaapi.get_account(account.metaapi_account_id)
-            if metaapi.account_state(remote) in {"deployed", "deploying"}:
-                metaapi.undeploy_account(account.metaapi_account_id)
-                account.connection_state = "undeploying"
-        except metaapi.MetaApiError as exc:
-            raise _metaapi_error(exc)
-    account.is_active = False
-    db.commit()
-    db.refresh(account)
-    return account
-
-
-@router.post("/{account_id}/reactivate", response_model=schemas.BrokerAccountResponse)
-async def reactivate_broker_account(
-    account_id: int,
-    current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
-    db: Session = Depends(get_db),
-):
-    account = _get_user_account(account_id, current_user["user_id"], db)
-    account.is_active = True
-    if account.broker == "direct-mt5":
-        account.connection_state = "waiting_for_ea"
-    elif account.metaapi_account_id:
-        try:
-            remote = metaapi.get_account(account.metaapi_account_id)
-            _apply_remote_state(account, remote)
-        except metaapi.MetaApiError as exc:
-            raise _metaapi_error(exc)
-    db.commit()
-    db.refresh(account)
-    return account
-
-
 @router.delete("/{account_id}", status_code=status.HTTP_200_OK)
 async def delete_broker_account(
     account_id: int,
