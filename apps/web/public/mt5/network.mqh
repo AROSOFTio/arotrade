@@ -3,15 +3,15 @@
 
 bool HttpPostJson(string url, string apiKey, string payload, string &response)
 {
+   char encoded[];
    char data[];
    char result[];
    string resultHeaders = "";
    string headers = "Content-Type: application/json\r\nX-AroPilot-Key: " + apiKey + "\r\n";
-   // An explicit count excludes the terminating NUL. WebRequest sends the
-   // complete array, so WHOLE_ARRAY would make an otherwise valid JSON body
-   // fail with "Extra data".
-   int bytes = StringToCharArray(payload, data, 0, StringLen(payload), CP_UTF8);
-   if(bytes <= 0)
+   int bytes = StringToCharArray(payload, encoded, 0, WHOLE_ARRAY, CP_UTF8);
+   int bodyBytes = bytes - 1;
+   if(bodyBytes <= 0 || ArrayResize(data, bodyBytes) != bodyBytes ||
+      ArrayCopy(data, encoded, 0, 0, bodyBytes) != bodyBytes)
    {
       Print("AroPilot bridge could not encode JSON payload");
       return false;
