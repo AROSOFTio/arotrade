@@ -15,11 +15,16 @@ struct AroPilotSignal
    string notes;
 };
 
-bool ExecuteCommandFromJson(string json, bool autoTradingEnabled, double maxLots, int maxOpenTrades, double maxDailyLossPercent)
+bool ExecuteCommandFromJson(string json, bool autoTradingEnabled, double maxLots, int maxOpenTrades, double maxDailyLossPercent, ulong &orderTicket, ulong &dealTicket, int &retcode, string &message)
 {
+   orderTicket = 0;
+   dealTicket = 0;
+   retcode = 0;
+   message = "No executable command";
+
    if(!JsonBoolValue(json, "trade_execution_enabled", false)) return false;
    if(!JsonBoolValue(json, "auto_trading_enabled", false)) return false;
-   if(!AutoTradeAllowedByUser(autoTradingEnabled)) return false;
+   if(!AutoTradeAllowedByUser(autoTradingEnabled)) { message = "EA auto trading input is disabled"; return false; }
 
    string action = JsonStringValue(json, "action", "");
    string direction = JsonStringValue(json, "direction", "");
@@ -28,8 +33,9 @@ bool ExecuteCommandFromJson(string json, bool autoTradingEnabled, double maxLots
    double takeProfit = JsonNumberValue(json, "take_profit", 0.0);
    string symbol = JsonStringValue(json, "symbol", _Symbol);
 
-   if(action != "open_trade" || (direction != "buy" && direction != "sell")) return false;
-   if(!LocalRiskAllows(volume, maxLots, maxOpenTrades, maxDailyLossPercent)) return false;
+   if(action != "open_trade") { message = "Unsupported command action"; return false; }
+   if(direction != "buy" && direction != "sell") { message = "Invalid command direction"; return false; }
+   if(!LocalRiskAllows(volume, maxLots, maxOpenTrades, maxDailyLossPercent)) { message = "Local EA risk gate blocked command"; return false; }
 
    CTrade trade;
    trade.SetExpertMagicNumber(20260730);
@@ -37,7 +43,12 @@ bool ExecuteCommandFromJson(string json, bool autoTradingEnabled, double maxLots
    bool ok = false;
    if(direction == "buy") ok = trade.Buy(volume, symbol, 0.0, stopLoss, takeProfit, "AroPilot AI");
    if(direction == "sell") ok = trade.Sell(volume, symbol, 0.0, stopLoss, takeProfit, "AroPilot AI");
-   if(!ok) Print("AroPilot trade command failed: ", trade.ResultRetcode(), " ", trade.ResultRetcodeDescription());
+
+   retcode = (int)trade.ResultRetcode();
+   orderTicket = trade.ResultOrder();
+   dealTicket = trade.ResultDeal();
+   message = trade.ResultRetcodeDescription();
+   if(!ok) Print("AroPilot trade command failed: ", retcode, " ", message);
    return ok;
 }
 

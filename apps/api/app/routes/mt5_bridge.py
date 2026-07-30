@@ -1,8 +1,7 @@
 from __future__ import annotations
-
+from datetime import datetime
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.orm import Session
-
 from app import models
 from app.database import get_db
 from app.services.mt5_bridge.store import (
@@ -12,11 +11,7 @@ from app.services.mt5_bridge.store import (
     store_candles,
     store_quote,
 )
-
 router = APIRouter()
-
-
-
 def _to_float(value) -> float | None:
     try:
         if value is None:
@@ -24,8 +19,6 @@ def _to_float(value) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
-
-
 def _analysis_to_chart_objects(analysis: models.AIAnalysis) -> list[dict]:
     objects: list[dict] = []
     levels = [
@@ -40,13 +33,10 @@ def _analysis_to_chart_objects(analysis: models.AIAnalysis) -> list[dict]:
         price_value = _to_float(price)
         if price_value and price_value > 0:
             objects.append({"type": "horizontal_line", "name": key, "label": label, "price": price_value, "role": role})
-
     entry = _to_float(analysis.entry_min) or _to_float(analysis.entry_max)
     if analysis.signal in ("buy", "sell") and entry and entry > 0:
         objects.append({"type": "arrow", "name": f"{analysis.signal}_signal", "direction": analysis.signal, "price": entry})
     return objects
-
-
 def _latest_signal_command(db: Session, account: models.BrokerAccount) -> dict | None:
     signal = db.query(models.Signal).filter(
         models.Signal.user_id == account.user_id,
@@ -70,8 +60,6 @@ def _latest_signal_command(db: Session, account: models.BrokerAccount) -> dict |
         "status": getattr(signal.status, "value", signal.status),
         "notes": signal.notes,
     }
-
-
 def _latest_analysis_command(db: Session, account: models.BrokerAccount, symbol: str | None, timeframe: str | None) -> dict | None:
     query = db.query(models.AIAnalysis).filter(models.AIAnalysis.user_id == account.user_id)
     if symbol:
@@ -101,8 +89,30 @@ def _latest_analysis_command(db: Session, account: models.BrokerAccount, symbol:
         "created_at": analysis.created_at.isoformat() if analysis.created_at else None,
         "chart_objects": _analysis_to_chart_objects(analysis),
     }
-
-
+def _pending_direct_mt5_command(db: Session, account: models.BrokerAccount) -> models.ExecutionIntent | None:
+    return db.query(models.ExecutionIntent).filter(
+        models.ExecutionIntent.broker_account_id == account.id,
+        models.ExecutionIntent.status == "QUEUED_DIRECT_MT5",
+    ).order_by(models.ExecutionIntent.created_at.asc()).first()
+def _command_payload(intent: models.ExecutionIntent) -> dict:
+    payload = intent.request_payload if isinstance(intent.request_payload, dict) else {}
+    return {
+        "command_id": intent.client_order_id,
+        "action": payload.get("action") or "open_trade",
+        "symbol": payload.get("symbol"),
+        "direction": payload.get("direction"),
+        "volume": payload.get("volume"),
+        "stop_loss": payload.get("stop_loss"),
+        "take_profit": payload.get("take_profit") or 0,
+    }
+def _mark_direct_command_sent(db: Session, intent: models.ExecutionIntent) -> None:
+    intent.status = "SENT_TO_MT5"
+    intent.execution_state = "SENT"
+    trade = db.query(models.Trade).filter(models.Trade.execution_intent_id == intent.id).first()
+    if trade:
+        trade.execution_status = "sent_to_mt5"
+        trade.submitted_at = trade.submitted_at or datetime.utcnow()
+    db.commit()
 @router.post("/heartbeat")
 async def bridge_heartbeat(
     payload: dict,
@@ -127,8 +137,6 @@ async def bridge_heartbeat(
     store_account_snapshot(account.id, payload)
     db.commit()
     return {"status": "connected", "account_id": account.id, "commands_enabled": True}
-
-
 @router.post("/quote")
 async def bridge_quote(
     payload: dict,
@@ -139,8 +147,6 @@ async def bridge_quote(
     account = require_bridge_account(db, x_aropilot_key, account_id)
     store_quote(account.id, payload)
     return {"status": "ok"}
-
-
 @router.post("/candles")
 async def bridge_candles(
     payload: dict,
@@ -156,8 +162,6 @@ async def bridge_candles(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="symbol, timeframe and candles are required")
     stored = store_candles(account.id, symbol, timeframe, candles)
     return {"status": "ok", "stored": len(stored)}
-
-
 @router.get("/candles")
 async def read_bridge_candles(
     account_id: int,
@@ -175,8 +179,6 @@ async def read_bridge_candles(
         "timeframe": timeframe.upper(),
         "candles": get_candles(account.id, symbol, timeframe, count),
     }
-
-
 @router.get("/commands")
 async def bridge_commands(
     account_id: int,
@@ -188,10 +190,12 @@ async def bridge_commands(
     account = require_bridge_account(db, x_aropilot_key, account_id)
     signal = _latest_signal_command(db, account)
     analysis = _latest_analysis_command(db, account, symbol, timeframe)
-    return {
+    pending = _pending_direct_mt5_command(db, account)
+    command = _command_payload(pending) if pending else None
+    response = {
         "account_id": account.id,
-        "trade_execution_enabled": False,
-        "auto_trading_enabled": False,
+        "trade_execution_enabled": bool(command),
+        "auto_trading_enabled": bool(command),
         "risk": {
             "max_risk_percent": 0.25,
             "max_daily_loss_percent": 3.0,
@@ -202,5 +206,49 @@ async def bridge_commands(
         "signal": signal,
         "notifications": [],
         "chart_objects": analysis.get("chart_objects", []) if analysis else [],
-        "commands": [],
+        "commands": [command] if command else [],
     }
+    if command:
+        response.update(command)
+        _mark_direct_command_sent(db, pending)
+    return response
+@router.post("/command-result")
+async def bridge_command_result(
+    payload: dict,
+    x_aropilot_key: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    account_id = int(payload.get("account_id") or 0)
+    account = require_bridge_account(db, x_aropilot_key, account_id)
+    command_id = str(payload.get("command_id") or "").strip()
+    if not command_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="command_id is required")
+    intent = db.query(models.ExecutionIntent).filter(
+        models.ExecutionIntent.broker_account_id == account.id,
+        models.ExecutionIntent.client_order_id == command_id,
+    ).first()
+    if not intent:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="command not found")
+    success = bool(payload.get("success"))
+    intent.broker_response = payload
+    intent.error = None if success else str(payload.get("message") or "MT5 command rejected")
+    intent.broker_order_id = str(payload.get("order_ticket") or "") or None
+    intent.broker_deal_id = str(payload.get("deal_ticket") or "") or None
+    intent.status = "FILLED" if success else "REJECTED"
+    intent.execution_state = "FILLED" if success else "REJECTED"
+    trade = db.query(models.Trade).filter(models.Trade.execution_intent_id == intent.id).first()
+    if trade:
+        trade.broker_order_id = intent.broker_order_id
+        trade.broker_deal_id = intent.broker_deal_id
+        trade.execution_error = intent.error
+        if success:
+            trade.status = models.TradeStatus.OPEN
+            trade.execution_status = "filled"
+            trade.filled_at = datetime.utcnow()
+            trade.opened_time = trade.filled_at
+            trade.actual_fill_price = trade.requested_price
+        else:
+            trade.status = models.TradeStatus.CANCELLED
+            trade.execution_status = "rejected"
+    db.commit()
+    return {"status": "recorded", "command_id": command_id, "success": success}
