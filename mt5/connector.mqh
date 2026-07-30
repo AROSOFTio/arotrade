@@ -3,6 +3,73 @@
 
 #include "network.mqh"
 #include "utils.mqh"
+#include "indicators.mqh"
+
+string BuildPositionsJson()
+{
+   string json = "[";
+   int total = PositionsTotal();
+   for(int i = 0; i < total; i++)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0 || !PositionSelectByTicket(ticket)) continue;
+      if(StringLen(json) > 1) json += ",";
+      json += "{"
+         + "\"ticket\":" + IntegerToString((long)ticket) + ","
+         + "\"symbol\":\"" + JsonEscape(PositionGetString(POSITION_SYMBOL)) + "\","
+         + "\"type\":\"" + (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY ? "buy" : "sell") + "\","
+         + "\"volume\":" + DoubleToString(PositionGetDouble(POSITION_VOLUME), 2) + ","
+         + "\"price_open\":" + DoubleToString(PositionGetDouble(POSITION_PRICE_OPEN), _Digits) + ","
+         + "\"stop_loss\":" + DoubleToString(PositionGetDouble(POSITION_SL), _Digits) + ","
+         + "\"take_profit\":" + DoubleToString(PositionGetDouble(POSITION_TP), _Digits) + ","
+         + "\"profit\":" + DoubleToString(PositionGetDouble(POSITION_PROFIT), 2)
+         + "}";
+   }
+   return json + "]";
+}
+
+string BuildOrdersJson()
+{
+   string json = "[";
+   int total = OrdersTotal();
+   for(int i = 0; i < total; i++)
+   {
+      ulong ticket = OrderGetTicket(i);
+      if(ticket == 0) continue;
+      if(StringLen(json) > 1) json += ",";
+      json += "{"
+         + "\"ticket\":" + IntegerToString((long)ticket) + ","
+         + "\"symbol\":\"" + JsonEscape(OrderGetString(ORDER_SYMBOL)) + "\","
+         + "\"type\":" + IntegerToString((int)OrderGetInteger(ORDER_TYPE)) + ","
+         + "\"volume\":" + DoubleToString(OrderGetDouble(ORDER_VOLUME_CURRENT), 2) + ","
+         + "\"price_open\":" + DoubleToString(OrderGetDouble(ORDER_PRICE_OPEN), _Digits)
+         + "}";
+   }
+   return json + "]";
+}
+
+string BuildHistoryJson(int maxDeals=20)
+{
+   datetime to = TimeCurrent();
+   datetime from = to - 86400 * 14;
+   HistorySelect(from, to);
+   int total = HistoryDealsTotal();
+   int start = MathMax(0, total - maxDeals);
+   string json = "[";
+   for(int i = start; i < total; i++)
+   {
+      ulong ticket = HistoryDealGetTicket(i);
+      if(ticket == 0) continue;
+      if(StringLen(json) > 1) json += ",";
+      json += "{"
+         + "\"ticket\":" + IntegerToString((long)ticket) + ","
+         + "\"symbol\":\"" + JsonEscape(HistoryDealGetString(ticket, DEAL_SYMBOL)) + "\","
+         + "\"profit\":" + DoubleToString(HistoryDealGetDouble(ticket, DEAL_PROFIT), 2) + ","
+         + "\"time\":\"" + TimeToIso((datetime)HistoryDealGetInteger(ticket, DEAL_TIME)) + "\""
+         + "}";
+   }
+   return json + "]";
+}
 
 string BuildHeartbeatJson(long accountId)
 {
@@ -13,9 +80,14 @@ string BuildHeartbeatJson(long accountId)
       + "\"balance\":" + DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2) + ","
       + "\"equity\":" + DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2) + ","
       + "\"margin\":" + DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN), 2) + ","
+      + "\"free_margin\":" + DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN_FREE), 2) + ","
       + "\"currency\":\"" + JsonEscape(AccountInfoString(ACCOUNT_CURRENCY)) + "\","
       + "\"symbol\":\"" + JsonEscape(_Symbol) + "\","
-      + "\"timeframe\":\"" + TfToText(_Period) + "\""
+      + "\"timeframe\":\"" + TfToText(_Period) + "\","
+      + "\"positions\":" + BuildPositionsJson() + ","
+      + "\"orders\":" + BuildOrdersJson() + ","
+      + "\"history\":" + BuildHistoryJson(20) + ","
+      + "\"indicators\":" + BuildIndicatorsJson()
       + "}";
 }
 
@@ -31,6 +103,8 @@ string BuildQuoteJson(long accountId)
       + "\"timeframe\":\"" + TfToText(_Period) + "\","
       + "\"bid\":" + DoubleToString(tick.bid, _Digits) + ","
       + "\"ask\":" + DoubleToString(tick.ask, _Digits) + ","
+      + "\"last\":" + DoubleToString(tick.last, _Digits) + ","
+      + "\"volume\":" + DoubleToString(tick.volume_real, 2) + ","
       + "\"spread\":" + DoubleToString(spread, 1) + ","
       + "\"time\":\"" + TimeToIso((datetime)tick.time) + "\""
       + "}";

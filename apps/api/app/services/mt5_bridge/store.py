@@ -69,6 +69,18 @@ def store_candles(account_id: int, symbol: str, timeframe: str, candles: list[di
     return cleaned
 
 
+
+
+def store_account_snapshot(account_id: int, payload: dict[str, Any]) -> None:
+    allowed_lists = ("positions", "orders", "history")
+    data = {**payload, "provider": "direct-mt5", "account_id": account_id, "received_at": datetime.utcnow().isoformat()}
+    for key in allowed_lists:
+        if key in data and not isinstance(data[key], list):
+            data[key] = []
+    client = redis_client()
+    client.set(f"mt5:account:{account_id}:snapshot", json.dumps(data), ex=300)
+    client.publish(f"channel:account:{account_id}", json.dumps(data))
+
 def store_quote(account_id: int, payload: dict[str, Any]) -> None:
     symbol = str(payload.get("symbol") or "").upper()
     if not symbol:

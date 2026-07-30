@@ -74,7 +74,7 @@ async def admin_dashboard(
         live_trades=live_trades,
         failed_trades=failed_trades,
         risk_violations=risk_violations,
-        api_errors=0  # TODO: Track API errors
+        api_errors=db.query(models.ExecutionLog).filter(models.ExecutionLog.status == "failed", models.ExecutionLog.created_at >= thirty_days_ago).count()
     )
 
 

@@ -1,6 +1,6 @@
 #property strict
-#property version   "0.1.0"
-#property description "AroPilot AI direct MT5 bridge. Streams market data to AroPilot over HTTPS."
+#property version   "1.0.0"
+#property description "AroPilot AI direct MT5 bridge. Streams market/account data, receives analysis, draws chart levels, and executes guarded commands when enabled."
 
 #include "config.mqh"
 #include "connector.mqh"
@@ -10,24 +10,30 @@
 #include "risk.mqh"
 
 input string BridgeUrl = AROPILOT_DEFAULT_BRIDGE_URL;
+input string WebSocketUrl = "";
 input string ApiKey = "";
 input long AccountId = 0;
 input int SendIntervalSeconds = 10;
 input int CandleBars = 240;
 input bool EnableAutoTrading = false;
+input double MaxLotsPerTrade = 0.10;
+input int MaxOpenTrades = 1;
+input double MaxDailyLossPercent = 3.0;
 
 bool g_connected = false;
 datetime g_lastSend = 0;
+datetime g_lastCandle = 0;
+int g_failureCount = 0;
 
 int OnInit()
 {
+   EventSetTimer(MathMax(5, SendIntervalSeconds));
    if(ApiKey == "" || AccountId <= 0)
    {
       PanelDrawStatus("missing ApiKey or AccountId");
       Print("AroPilot EA: set BridgeUrl, AccountId and ApiKey. Add https://arotrader.arosoftlabs.com to Tools > Options > Expert Advisors > Allow WebRequest.");
       return INIT_SUCCEEDED;
    }
-   EventSetTimer(MathMax(5, SendIntervalSeconds));
    PanelDrawStatus("starting");
    return INIT_SUCCEEDED;
 }
@@ -41,14 +47,29 @@ void OnDeinit(const int reason)
 void OnTick()
 {
    if(ApiKey == "" || AccountId <= 0) return;
-   if(TimeCurrent() - g_lastSend >= SendIntervalSeconds)
+   datetime currentCandle = iTime(_Symbol, _Period, 0);
+   if(currentCandle != g_lastCandle)
+   {
+      g_lastCandle = currentCandle;
       SendSnapshot();
+      return;
+   }
+   if(TimeCurrent() - g_lastSend >= SendIntervalSeconds) SendSnapshot();
 }
 
 void OnTimer()
 {
    if(ApiKey == "" || AccountId <= 0) return;
    SendSnapshot();
+}
+
+void PollCommands()
+{
+   string response = "";
+   string url = BridgeUrl + "/commands?account_id=" + IntegerToString(AccountId) + "&symbol=" + _Symbol + "&timeframe=" + TfToText(_Period);
+   if(!HttpGet(url, ApiKey, response)) return;
+   DrawAnalysisFromJson(response);
+   ExecuteCommandFromJson(response, EnableAutoTrading, MaxLotsPerTrade, MaxOpenTrades, MaxDailyLossPercent);
 }
 
 void SendSnapshot()
@@ -59,14 +80,15 @@ void SendSnapshot()
    string candles = BuildCandlesJson(AccountId, CandleBars);
    bool candleOk = candles != "" && BridgePost(BridgeUrl, ApiKey, "/candles", candles);
    g_connected = heartbeat && quote && candleOk;
-   PanelDrawStatus(g_connected ? "connected" : "connection issue");
-
-   string response = "";
-   HttpGet(BridgeUrl + "/commands?account_id=" + IntegerToString(AccountId), ApiKey, response);
-
-   if(EnableAutoTrading && AutoTradeAllowedByUser(EnableAutoTrading))
+   if(g_connected)
    {
-      // Trade execution is intentionally not implemented in v0.1. The backend
-      // returns no executable commands until the user explicitly enables it in web settings.
+      g_failureCount = 0;
+      PanelDrawStatus("connected");
+      PollCommands();
+   }
+   else
+   {
+      g_failureCount++;
+      PanelDrawStatus("reconnecting " + IntegerToString(g_failureCount));
    }
 }
