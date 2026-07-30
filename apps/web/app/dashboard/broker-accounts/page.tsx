@@ -83,7 +83,7 @@ export default function BrokerAccountsPage() {
       const account = await apiRequest<BrokerAccount>('/broker-accounts/mt5', { method: 'POST', body: JSON.stringify(form) })
       setAccounts((current) => [account, ...current])
       setForm(initialForm)
-      setMessage('Account registered with MetaApi. Press Deploy to start the connection (hourly billing runs only while deployed).')
+      setMessage('Optional MetaApi adapter registered. Deploy it only if you explicitly want hosted broker connectivity.')
     } catch (requestError) { setError(errorMessage(requestError)) } finally { setSubmitting(false) }
   }
 
@@ -124,7 +124,7 @@ export default function BrokerAccountsPage() {
       <PageHeader
         eyebrow="Brokers"
         title="Broker accounts"
-        description="Connect your MT5 account (Exness or any MT5 broker) through MetaApi. Deploy to go online; undeploy any time to stop connection billing."
+        description="Connect MetaTrader 5 through the AroPilot Expert Advisor. MetaApi remains available as an optional advanced broker adapter."
       />
       {(error || message) && <div className={`mb-5 rounded-md border px-4 py-3 text-sm ${error ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>{error || message}</div>}
       <section className="grid gap-6 xl:grid-cols-[minmax(340px,0.7fr)_minmax(0,1.3fr)]">
@@ -134,7 +134,7 @@ export default function BrokerAccountsPage() {
               <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50 text-[#16a34a]"><PlugZap size={18} aria-hidden="true" /></span>
               <div>
                 <h2 className="text-sm font-semibold text-slate-900">Direct MT5 bridge</h2>
-                <p className="mt-0.5 text-xs text-slate-500">Use an Expert Advisor in your MetaTrader terminal. No MetaApi top-up required.</p>
+                <p className="mt-0.5 text-xs text-slate-500">Use the AroPilot Expert Advisor in your MetaTrader terminal for the primary live data bridge.</p>
               </div>
             </div>
             <div className="mt-5 grid grid-cols-2 gap-4">
@@ -176,8 +176,8 @@ export default function BrokerAccountsPage() {
           <div className="flex items-center gap-2">
             <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-[#2563eb]"><Link2 size={18} aria-hidden="true" /></span>
             <div>
-              <h2 className="text-sm font-semibold text-slate-900">Connect MT5 / Exness account</h2>
-              <p className="mt-0.5 text-xs text-slate-500">Credentials go straight to MetaApi — never stored on AroTrader.</p>
+              <h2 className="text-sm font-semibold text-slate-900">Optional MetaApi adapter</h2>
+              <p className="mt-0.5 text-xs text-slate-500">Optional hosted broker adapter. Credentials are forwarded to MetaApi and are not stored by AroPilot.</p>
             </div>
           </div>
           <div className="mt-5">
@@ -216,14 +216,14 @@ export default function BrokerAccountsPage() {
               </select>
             </div>
           </div>
-          <button type="submit" disabled={submitting} className="btn-primary mt-5 w-full">{submitting ? 'Connecting…' : 'Connect account'}</button>
+          <button type="submit" disabled={submitting} className="btn-primary mt-5 w-full">{submitting ? 'Connecting…' : 'Connect optional adapter'}</button>
         </form>
         </div>
 
         <div className="card overflow-hidden p-0">
           <div className="border-b border-slate-200 px-5 py-4">
             <h2 className="text-sm font-semibold text-slate-900">Connected accounts</h2>
-            <p className="mt-1 text-xs text-slate-500">Deploy = online and billable per hour on MetaApi. Undeploy = offline, billing stopped.</p>
+            <p className="mt-1 text-xs text-slate-500">Direct MT5 bridge is primary. Optional MetaApi adapters can be deployed or undeployed from this list.</p>
           </div>
           {loading ? <div className="p-8 text-sm text-slate-500">Loading accounts…</div> : accounts.length ? (
             <div className="divide-y divide-slate-100">

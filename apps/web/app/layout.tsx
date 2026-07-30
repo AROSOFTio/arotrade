@@ -2,12 +2,12 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'AroTrader AI',
+  title: 'AroPilot AI',
   description: 'AI-Powered Trading Intelligence',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
-    title: 'AroTrader',
+    title: 'AroPilot',
     statusBarStyle: 'black-translucent',
   },
 }

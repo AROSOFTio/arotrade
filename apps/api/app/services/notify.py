@@ -76,4 +76,4 @@ def notify_signal_event(db: Session, user: models.User, signal: models.Signal, e
     create_notification(db, user.id, title, body, category="signal", link="/dashboard/signals")
 
     if event in ("approved", "executed_live"):
-        send_email(user.email, f"AroTrade: {title}", f"{body}\n\nOpen your dashboard: {settings.APP_URL}/dashboard/signals")
+        send_email(user.email, f"AroPilot: {title}", f"{body}\n\nOpen your dashboard: {settings.APP_URL}/dashboard/signals")

@@ -197,7 +197,6 @@ class AIAnalysis(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     symbol = Column(String(20), nullable=False)
     timeframe = Column(String(10), nullable=False)
-    image_url = Column(String(500), nullable=True)
     prompt = Column(Text, nullable=True)
 
     # Analysis result (JSON)
@@ -483,8 +482,6 @@ class JournalEntry(Base):
     mistake_category = Column(String(100), nullable=True)
     notes = Column(Text, nullable=True)
     lesson_learned = Column(Text, nullable=True)
-
-    screenshot_url = Column(String(500), nullable=True)
     ai_feedback = Column(Text, nullable=True)
 
     created_at = Column(DateTime, server_default=func.now())
@@ -732,4 +729,3 @@ class ExecutionIntent(Base):
             name="uq_one_active_intent_per_signal_mode",
         ),
     )
-

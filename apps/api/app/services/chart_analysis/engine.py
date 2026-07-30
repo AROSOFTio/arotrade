@@ -9,7 +9,7 @@ from threading import Lock
 from typing import Optional
 
 from app.config import settings
-from app.services.gemini import AIProviderError, AIProviderNotConfigured, analyze_json
+from app.services.ai_runtime import AIProviderError, AIProviderNotConfigured, analyze_json
 
 from .fibonacci import detect_fibonacci
 from .market_structure import (

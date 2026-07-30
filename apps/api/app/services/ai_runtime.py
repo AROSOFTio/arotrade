@@ -1,8 +1,7 @@
-"""Backward-compatible AI service facade.
+"""AI runtime facade backed by the provider manager.
 
-Historical routes import this module as `gemini`. The implementation now lives
-in app.services.ai.provider_manager so providers stay independent and unavailable
-models degrade cleanly.
+All market analysis goes through the provider manager so local, free, and paid
+providers share the same deterministic market snapshot and response schema.
 """
 
 from __future__ import annotations
@@ -10,10 +9,11 @@ from __future__ import annotations
 from typing import Optional
 
 from app.services.ai.provider_manager import provider_manager
-from app.services.ai.providers.base import AIProviderError, AIProviderNotConfigured
+from app.services.ai.providers.base import AIProviderError, AIProviderNotConfigured, json_from_text
 
-GeminiError = AIProviderError
-GeminiNotConfigured = AIProviderNotConfigured
+
+ProviderRuntimeError = AIProviderError
+ProviderRuntimeNotConfigured = AIProviderNotConfigured
 
 
 def ai_health_details() -> dict:
@@ -30,8 +30,6 @@ def ai_health_details() -> dict:
 
 def analyze_json(prompt: str, *, temperature: float = 0.3) -> dict:
     del temperature
-    from app.services.ai.providers.base import json_from_text
-
     return json_from_text(provider_manager.generate_with_fallback([prompt], json_response=True))
 
 
@@ -42,8 +40,9 @@ def answer_analysis_question(analysis_summary: str, history: list[dict], questio
         transcript += f"{speaker}: {str(message.get('content', ''))[:500]}\n"
     prompt = (
         "You are a patient trading mentor. A trader is asking follow-up questions about "
-        "an AI market analysis. Explain clearly in plain language, define jargon, keep "
-        "answers under 150 words, never promise profits, and do not invent new price levels.\n\n"
+        "a market analysis generated from live MT5 data. Explain clearly in plain language, "
+        "define jargon, keep answers under 150 words, never promise profits, and do not "
+        "invent new price levels.\n\n"
         f"THE ANALYSIS BEING DISCUSSED:\n{analysis_summary}\n\n"
         f"CONVERSATION SO FAR:\n{transcript}"
         f"Trader: {question[:500]}\nAnalyst:"
@@ -51,12 +50,10 @@ def answer_analysis_question(analysis_summary: str, history: list[dict], questio
     return provider_manager.generate_with_fallback([prompt], json_response=False).strip()
 
 
-def run_chart_analysis(
+def run_market_analysis(
     symbol: str,
     timeframe: str,
     prompt: Optional[str] = None,
-    image_bytes: Optional[bytes] = None,
-    image_mime: Optional[str] = None,
     price_context: Optional[str] = None,
     deterministic_analysis: Optional[dict] = None,
 ) -> dict:
@@ -64,8 +61,8 @@ def run_chart_analysis(
         symbol=symbol,
         timeframe=timeframe,
         prompt=prompt,
-        image_bytes=image_bytes,
-        image_mime=image_mime,
+        image_bytes=None,
+        image_mime=None,
         price_context=price_context,
         deterministic_analysis=deterministic_analysis,
     )

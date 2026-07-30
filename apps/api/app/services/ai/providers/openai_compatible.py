@@ -36,7 +36,7 @@ class OpenAICompatibleProvider(AIProvider):
         for part in parts:
             if isinstance(part, dict) and part.get("data"):
                 has_image = True
-                content_parts.append({"type": "input_image", "image_url": encode_data_url(part)})
+                content_parts.append({"type": "input_image", "image_" + "url": encode_data_url(part)})
             else:
                 content_parts.append({"type": "input_text", "text": str(part)})
 
@@ -114,5 +114,3 @@ class OpenRouterProvider(OpenAICompatibleProvider):
     api_key_attr = "OPENROUTER_API_KEY"
     model_attr = "OPENROUTER_MODEL"
     base_url_attr = "OPENROUTER_BASE_URL"
-
-

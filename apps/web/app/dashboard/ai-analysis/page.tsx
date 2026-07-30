@@ -214,7 +214,7 @@ export default function AIAnalysisPage() {
         <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-6 text-center">
           <Landmark size={32} className="mx-auto text-blue-500" />
           <h2 className="mt-3 text-sm font-semibold text-slate-900">No active broker accounts connected</h2>
-          <p className="mt-1 text-xs text-slate-500">Connect a deployed MetaApi account or a direct MT5 bridge account to run AI market analysis.</p>
+          <p className="mt-1 text-xs text-slate-500">Connect the direct MT5 Expert Advisor bridge to run live market analysis.</p>
           <div className="mt-4"><a href="/dashboard/broker-accounts" className="btn-primary px-4 py-1.5 text-xs font-semibold">Connect Account</a></div>
         </div>
       </>
@@ -226,7 +226,7 @@ export default function AIAnalysisPage() {
       <PageHeader
         eyebrow="Research"
         title="AI analysis"
-        description="Compare multiple AI models on the same live MT5 snapshot. No screenshots are required, and unavailable providers stay visible."
+        description="Compare multiple AI models on the same live MT5 snapshot. Powered by live MT5 data, deterministic analysis, and graceful provider fallback."
       />
 
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-lg border border-slate-200 bg-white px-5 py-3">
@@ -329,7 +329,7 @@ export default function AIAnalysisPage() {
             <div><h3 className="text-sm font-semibold text-slate-900">Reasoning</h3><ul className="mt-2 space-y-1.5">{result.reasoning.map((reason, index) => <li key={index} className="flex gap-2 text-sm leading-6 text-slate-600"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#2563eb]" />{reason}</li>)}</ul></div>
             <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600"><span className="font-semibold text-slate-900">Invalidation:</span> {result.invalidation}</div>
             {result.risk_warning && <div className="flex gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700"><ShieldAlert size={17} className="mt-0.5 shrink-0" />{result.risk_warning}</div>}
-            <div className="border-t border-slate-200 pt-4"><h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900"><MessageCircleQuestion size={16} className="text-[#2563eb]" />Ask about this analysis</h3>{chat.length > 0 && <div className="mt-3 max-h-72 space-y-2 overflow-y-auto">{chat.map((message, index) => <div key={index} className={`rounded-md px-3 py-2.5 text-sm leading-6 ${message.role === 'user' ? 'ml-8 bg-blue-50 text-slate-800' : 'mr-8 bg-slate-50 text-slate-700'}`}>{message.content}</div>)}{chatLoading && <div className="mr-8 rounded-md bg-slate-50 px-3 py-2.5 text-sm text-slate-400">Thinking...</div>}</div>}<div className="mt-3 flex gap-2"><input value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void askQuestion() } }} className="input-base" placeholder="e.g. Why did Gemini disagree with GPT?" maxLength={500} aria-label="Ask a question about this analysis" /><button type="button" onClick={() => void askQuestion()} disabled={chatLoading || !chatInput.trim()} className="btn-primary shrink-0 px-3" title="Send question" aria-label="Send question"><Send size={16} /></button></div></div>
+            <div className="border-t border-slate-200 pt-4"><h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900"><MessageCircleQuestion size={16} className="text-[#2563eb]" />Ask about this analysis</h3>{chat.length > 0 && <div className="mt-3 max-h-72 space-y-2 overflow-y-auto">{chat.map((message, index) => <div key={index} className={`rounded-md px-3 py-2.5 text-sm leading-6 ${message.role === 'user' ? 'ml-8 bg-blue-50 text-slate-800' : 'mr-8 bg-slate-50 text-slate-700'}`}>{message.content}</div>)}{chatLoading && <div className="mr-8 rounded-md bg-slate-50 px-3 py-2.5 text-sm text-slate-400">Thinking...</div>}</div>}<div className="mt-3 flex gap-2"><input value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void askQuestion() } }} className="input-base" placeholder="e.g. Why did one provider disagree?" maxLength={500} aria-label="Ask a question about this analysis" /><button type="button" onClick={() => void askQuestion()} disabled={chatLoading || !chatInput.trim()} className="btn-primary shrink-0 px-3" title="Send question" aria-label="Send question"><Send size={16} /></button></div></div>
           </div>}
 
           {!result && !comparison && <div className="card flex min-h-48 flex-col items-center justify-center gap-3 text-center"><span className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-[#2563eb]"><Bot size={24} /></span><div><h2 className="text-sm font-semibold text-slate-900">No analysis yet</h2><p className="mt-1 max-w-sm text-sm leading-6 text-slate-500">Pick a symbol and compare configured providers on the live MT5 feed.</p></div></div>}

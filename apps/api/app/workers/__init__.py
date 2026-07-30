@@ -1,4 +1,4 @@
-"""AroTrade Celery application and task registry.
+"""AroPilot Celery application and task registry.
 
 Workers configured:
   - scanner_tasks  : Run scanner pipeline on new closed candles

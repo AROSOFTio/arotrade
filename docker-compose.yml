@@ -1,7 +1,7 @@
 version: '3.8'
 
 # ============================================================================
-# AroTrade AI - Docker Compose (Local Development / VPS)
+# AroPilot AI - Docker Compose (Local Development / VPS)
 #
 # Services:
 #   postgres  - PostgreSQL database
@@ -89,7 +89,7 @@ x-api-env: &api-env
   SMTP_USER: ${SMTP_USER:-}
   SMTP_PASSWORD: ${SMTP_PASSWORD:-}
   SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-noreply@arotrader.com}
-  SMTP_FROM_NAME: ${SMTP_FROM_NAME:-AroTrade AI}
+  SMTP_FROM_NAME: ${SMTP_FROM_NAME:-AroPilot AI}
   APP_URL: ${APP_URL:-http://localhost:3000}
 
 services:
@@ -217,13 +217,13 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
-        NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-AroTrade AI}
+        NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-AroPilot AI}
         NEXT_PUBLIC_MAX_LIVE_RISK_PERCENT: ${NEXT_PUBLIC_MAX_LIVE_RISK_PERCENT:-${MAX_LIVE_RISK_PERCENT:-0.25}}
     container_name: arotrade-web
     environment:
       NODE_ENV: ${APP_ENV:-production}
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
-      NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-AroTrade AI}
+      NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-AroPilot AI}
       NEXT_PUBLIC_BRAND_COLOR: ${NEXT_PUBLIC_BRAND_COLOR:-#155DFC}
       NEXT_PUBLIC_MAX_LIVE_RISK_PERCENT: ${NEXT_PUBLIC_MAX_LIVE_RISK_PERCENT:-${MAX_LIVE_RISK_PERCENT:-0.25}}
     expose:

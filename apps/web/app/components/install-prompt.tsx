@@ -48,11 +48,11 @@ export function InstallPrompt() {
   if (!visible || !installEvent) return null
 
   return (
-    <div className="fixed inset-x-4 bottom-4 z-50 sm:inset-x-auto sm:right-6 sm:w-96" role="dialog" aria-label="Install AroTrader">
+    <div className="fixed inset-x-4 bottom-4 z-50 sm:inset-x-auto sm:right-6 sm:w-96" role="dialog" aria-label="Install AroPilot">
       <div className="card flex items-start gap-3 p-4 shadow-xl">
         <img src="/logo.png" alt="" aria-hidden="true" className="h-11 w-11 shrink-0 rounded-lg" />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold text-slate-950">Install AroTrader</p>
+          <p className="text-sm font-bold text-slate-950">Install AroPilot</p>
           <p className="mt-0.5 text-xs leading-5 text-slate-500">Get the app on your home screen — faster access, full screen, no browser bars.</p>
           <div className="mt-3 flex items-center gap-2">
             <button type="button" onClick={() => void install()} className="btn-primary min-h-8 px-3 py-1 text-xs">

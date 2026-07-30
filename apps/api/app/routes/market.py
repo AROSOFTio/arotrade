@@ -13,8 +13,9 @@ from app.services.chart_analysis import engine as chart_analysis_engine
 from app.services.chart_analysis.models import ChartAnalysisResponse
 from app.services import metaapi_gateway as metaapi, news
 from app.services.execution import ExecutionError, resolve_broker_symbol
+from app.services.mt5_bridge.store import get_account_snapshot, get_candles as get_bridge_candles, get_quote as get_bridge_quote
 
-from app.services.gemini import AIProviderError, AIProviderNotConfigured, ai_health_details, analyze_json
+from app.services.ai_runtime import AIProviderError, AIProviderNotConfigured, ai_health_details, analyze_json
 
 router = APIRouter()
 
@@ -31,6 +32,18 @@ def _get_user_account(account_id: int, user_id: int, db: Session) -> models.Brok
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Broker account not found")
     return account
 
+def _is_direct_bridge_account(account: models.BrokerAccount) -> bool:
+    return account.broker == "direct-mt5" or account.connection_state == "direct_connected"
+
+
+def _quote_age_seconds(value: str | None) -> float:
+    if not value:
+        return 0.0
+    try:
+        quote_time = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return (datetime.now(UTC) - quote_time).total_seconds()
+    except Exception:
+        return 0.0
 
 def _ensure_deployed_account(account: models.BrokerAccount) -> dict:
     if not account.metaapi_account_id:
@@ -110,12 +123,25 @@ async def get_market_status(
     db: Session = Depends(get_db)
 ):
     account = _get_user_account(account_id, current_user["user_id"], db)
+    if _is_direct_bridge_account(account):
+        snapshot = get_account_snapshot(account.id) or {}
+        return {
+            "provider": "direct-mt5",
+            "platform": "mt5",
+            "broker_account_id": account.id,
+            "masked_login": f"{account.account_id[:3]}***" if account.account_id else "",
+            "broker": account.broker,
+            "server": account.server,
+            "account_type": account.account_type,
+            "connection_state": account.connection_state or "direct_connected",
+            "synchronization_state": "connected" if snapshot else "waiting_for_ea",
+            "is_live_data": bool(snapshot),
+        }
+
     try:
         remote = metaapi.get_account(account.metaapi_account_id)
         state = (remote.get("state") or "").lower()
         connection = (remote.get("connectionStatus") or "").lower()
-        
-        # update local connection state if changed
         state_str = "deployed" if state == "deployed" else state
         if account.connection_state != state_str:
             account.connection_state = state_str
@@ -125,7 +151,7 @@ async def get_market_status(
         connection = "disconnected"
 
     return {
-        "provider": "metaapi",
+        "provider": "metaapi-optional",
         "platform": account.platform or "mt5",
         "broker_account_id": account.id,
         "masked_login": f"{account.account_id[:3]}***" if account.account_id else "",
@@ -136,7 +162,6 @@ async def get_market_status(
         "synchronization_state": connection,
         "is_live_data": state == "deployed" and connection == "connected",
     }
-
 
 @router.get("/accounts/{account_id}/symbols")
 async def get_market_symbols(
@@ -149,21 +174,31 @@ async def get_market_symbols(
         models.BrokerSymbol.broker_account_id == account.id,
         models.BrokerSymbol.trade_allowed == True
     ).all()
-
-    return {
-        "provider": "metaapi",
-        "platform": account.platform or "mt5",
-        "broker_account_id": account.id,
-        "symbols": [
-            {
-                "canonical_symbol": s.canonical_symbol,
-                "broker_symbol": s.broker_symbol,
-                "display_name": s.display_name,
-                "category": s.category,
-            } for s in symbols
+    snapshot = get_account_snapshot(account.id) if _is_direct_bridge_account(account) else None
+    snapshot_symbols = sorted({
+        str(item.get("symbol") or item.get("broker_symbol") or "").upper()
+        for item in (snapshot or {}).get("symbols", [])
+        if isinstance(item, dict) and (item.get("symbol") or item.get("broker_symbol"))
+    })
+    rows = [
+        {
+            "canonical_symbol": s.canonical_symbol,
+            "broker_symbol": s.broker_symbol,
+            "display_name": s.display_name,
+            "category": s.category,
+        } for s in symbols
+    ]
+    if not rows and snapshot_symbols:
+        rows = [
+            {"canonical_symbol": symbol, "broker_symbol": symbol, "display_name": symbol, "category": "mt5"}
+            for symbol in snapshot_symbols
         ]
+    return {
+        "provider": "direct-mt5" if _is_direct_bridge_account(account) else "metaapi-optional",
+        "platform": "mt5" if _is_direct_bridge_account(account) else (account.platform or "mt5"),
+        "broker_account_id": account.id,
+        "symbols": rows,
     }
-
 
 @router.post("/accounts/{account_id}/sync-symbols")
 async def sync_market_symbols(
@@ -172,14 +207,17 @@ async def sync_market_symbols(
     db: Session = Depends(get_db)
 ):
     account = _get_user_account(account_id, current_user["user_id"], db)
+    if _is_direct_bridge_account(account):
+        snapshot = get_account_snapshot(account.id) or {}
+        symbols = snapshot.get("symbols") if isinstance(snapshot.get("symbols"), list) else []
+        return {"status": "success", "provider": "direct-mt5", "synced": len(symbols)}
     if not account.metaapi_account_id:
-        raise HTTPException(status_code=400, detail="Account not connected to MetaApi")
+        raise HTTPException(status_code=400, detail="Account is not connected through the optional MetaApi adapter")
 
     from app.services.broker_symbol_sync import sync_broker_symbols_for_account
     result = sync_broker_symbols_for_account(db, account)
     db.commit()
-    return {"status": "success", "synced": result.synced}
-
+    return {"status": "success", "provider": "metaapi-optional", "synced": result.synced}
 
 @router.get("/accounts/{account_id}/symbols/{broker_symbol}/specification")
 async def get_symbol_specification(
@@ -193,26 +231,25 @@ async def get_symbol_specification(
         models.BrokerSymbol.broker_account_id == account.id,
         models.BrokerSymbol.broker_symbol == broker_symbol
     ).first()
-    if not bs:
+    if not bs and not _is_direct_bridge_account(account):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Symbol {broker_symbol} not found")
 
     return {
-        "provider": "metaapi",
-        "platform": account.platform or "mt5",
+        "provider": "direct-mt5" if _is_direct_bridge_account(account) else "metaapi-optional",
+        "platform": "mt5" if _is_direct_bridge_account(account) else (account.platform or "mt5"),
         "broker_account_id": account.id,
-        "broker_symbol": bs.broker_symbol,
-        "canonical_symbol": bs.canonical_symbol,
-        "digits": bs.digits,
-        "point": bs.point,
-        "tick_size": bs.tick_size,
-        "tick_value": bs.tick_value,
-        "contract_size": bs.contract_size,
-        "volume_min": bs.volume_min,
-        "volume_max": bs.volume_max,
-        "volume_step": bs.volume_step,
-        "trade_allowed": bs.trade_allowed,
+        "broker_symbol": bs.broker_symbol if bs else broker_symbol.upper(),
+        "canonical_symbol": bs.canonical_symbol if bs else broker_symbol.upper(),
+        "digits": bs.digits if bs else None,
+        "point": bs.point if bs else None,
+        "tick_size": bs.tick_size if bs else None,
+        "tick_value": bs.tick_value if bs else None,
+        "contract_size": bs.contract_size if bs else None,
+        "volume_min": bs.volume_min if bs else None,
+        "volume_max": bs.volume_max if bs else None,
+        "volume_step": bs.volume_step if bs else None,
+        "trade_allowed": bs.trade_allowed if bs else True,
     }
-
 
 @router.get("/accounts/{account_id}/symbols/{broker_symbol}/quote")
 async def get_symbol_quote(
@@ -222,6 +259,29 @@ async def get_symbol_quote(
     db: Session = Depends(get_db)
 ):
     account = _get_user_account(account_id, current_user["user_id"], db)
+    if _is_direct_bridge_account(account):
+        quote = get_bridge_quote(account.id, broker_symbol)
+        if not quote:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No direct MT5 quote has been received for this symbol")
+        bid = float(quote.get("bid") or quote.get("brokerBid") or 0.0)
+        ask = float(quote.get("ask") or quote.get("brokerAsk") or 0.0)
+        spread = float(quote.get("spread") or (ask - bid if ask and bid else 0.0))
+        quote_time_str = quote.get("time") or quote.get("brokerTime") or quote.get("timestamp") or quote.get("received_at") or ""
+        age = _quote_age_seconds(quote_time_str)
+        return {
+            "provider": "direct-mt5",
+            "platform": "mt5",
+            "broker_account_id": account.id,
+            "exact_broker_symbol": broker_symbol,
+            "bid": bid,
+            "ask": ask,
+            "spread": spread,
+            "quote_timestamp": quote_time_str,
+            "quote_age": age,
+            "is_live_data": age <= settings.QUOTE_STALE_AFTER_SECONDS,
+            "connection_state": account.connection_state,
+        }
+
     try:
         quote = metaapi.get_symbol_price(account.metaapi_account_id, broker_symbol, require_fresh=False)
     except Exception as exc:
@@ -230,20 +290,12 @@ async def get_symbol_quote(
     bid = float(quote.get("bid") or quote.get("brokerBid") or 0.0)
     ask = float(quote.get("ask") or quote.get("brokerAsk") or 0.0)
     spread = float(quote.get("spread") or (ask - bid if ask and bid else 0.0))
-
     quote_time_str = quote.get("time") or quote.get("brokerTime") or ""
-    age = 0.0
-    if quote_time_str:
-        try:
-            quote_time = datetime.fromisoformat(quote_time_str.replace("Z", "+00:00"))
-            age = (datetime.now(UTC) - quote_time).total_seconds()
-        except Exception:
-            pass
-
+    age = _quote_age_seconds(quote_time_str)
     is_live = age <= settings.QUOTE_STALE_AFTER_SECONDS and account.connection_state == "deployed"
 
     return {
-        "provider": "metaapi",
+        "provider": "metaapi-optional",
         "platform": account.platform or "mt5",
         "broker_account_id": account.id,
         "exact_broker_symbol": broker_symbol,
@@ -256,7 +308,6 @@ async def get_symbol_quote(
         "connection_state": account.connection_state,
     }
 
-
 @router.get("/accounts/{account_id}/symbols/{broker_symbol}/candles")
 async def get_symbol_candles(
     account_id: int,
@@ -267,6 +318,19 @@ async def get_symbol_candles(
     db: Session = Depends(get_db)
 ):
     account = _get_user_account(account_id, current_user["user_id"], db)
+    if _is_direct_bridge_account(account):
+        candles = get_bridge_candles(account.id, broker_symbol, timeframe, count)
+        if not candles:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No direct MT5 candles have been received for this symbol and timeframe")
+        return {
+            "provider": "direct-mt5",
+            "platform": "mt5",
+            "broker_account_id": account.id,
+            "exact_broker_symbol": broker_symbol,
+            "timeframe": timeframe,
+            "candles": candles,
+        }
+
     try:
         tf = metaapi.normalize_timeframe(timeframe)
         candles = metaapi.get_candles(account.metaapi_account_id, broker_symbol, tf, count)
@@ -274,14 +338,13 @@ async def get_symbol_candles(
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
 
     return {
-        "provider": "metaapi",
+        "provider": "metaapi-optional",
         "platform": account.platform or "mt5",
         "broker_account_id": account.id,
         "exact_broker_symbol": broker_symbol,
         "timeframe": timeframe,
         "candles": candles,
     }
-
 
 @router.get("/accounts/{account_id}/symbols/{broker_symbol}/analysis", response_model=ChartAnalysisResponse)
 async def get_symbol_analysis(
@@ -295,25 +358,30 @@ async def get_symbol_analysis(
     db: Session = Depends(get_db),
 ):
     account = _get_user_account(account_id, current_user["user_id"], db)
-    _ensure_deployed_account(account)
-    symbol, exact_broker_symbol = _resolve_analysis_symbol(db, account, broker_symbol)
     analysis_timeframe = _canonical_timeframe_label(timeframe)
 
-    try:
-        tf = metaapi.normalize_timeframe(analysis_timeframe)
-        candles = metaapi.get_candles(account.metaapi_account_id, exact_broker_symbol, tf, count)
-    except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+    if _is_direct_bridge_account(account):
+        symbol = broker_symbol.strip().upper()
+        exact_broker_symbol = symbol
+        candles = get_bridge_candles(account.id, exact_broker_symbol, analysis_timeframe, count)
+    else:
+        _ensure_deployed_account(account)
+        symbol, exact_broker_symbol = _resolve_analysis_symbol(db, account, broker_symbol)
+        try:
+            tf = metaapi.normalize_timeframe(analysis_timeframe)
+            candles = metaapi.get_candles(account.metaapi_account_id, exact_broker_symbol, tf, count)
+        except Exception as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
 
     if not candles:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="No candle data returned by the broker")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="No live MT5 candle data is available")
 
     last_candle = candles[-1]
     last_candle_time = chart_analysis_engine.parse_chart_time(
         last_candle.get("time") or last_candle.get("brokerTime") or last_candle.get("broker_time")
     )
     if last_candle_time is None:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Broker candles did not include a valid timestamp")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="MT5 candles did not include a valid timestamp")
 
     include_set = chart_analysis_engine.parse_include(include)
     if not force_refresh:
@@ -350,7 +418,6 @@ async def get_symbol_analysis(
     )
     return analysis
 
-
 @router.get("/accounts/{account_id}/positions")
 async def get_account_positions(
     account_id: int,
@@ -358,18 +425,21 @@ async def get_account_positions(
     db: Session = Depends(get_db)
 ):
     account = _get_user_account(account_id, current_user["user_id"], db)
+    if _is_direct_bridge_account(account):
+        snapshot = get_account_snapshot(account.id) or {}
+        positions = snapshot.get("positions") if isinstance(snapshot.get("positions"), list) else []
+        return {"provider": "direct-mt5", "platform": "mt5", "broker_account_id": account.id, "positions": positions}
     try:
         positions = metaapi.get_positions(account.metaapi_account_id)
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
 
     return {
-        "provider": "metaapi",
+        "provider": "metaapi-optional",
         "platform": account.platform or "mt5",
         "broker_account_id": account.id,
         "positions": positions,
     }
-
 
 @router.get("/accounts/{account_id}/orders")
 async def get_account_orders(
@@ -378,18 +448,21 @@ async def get_account_orders(
     db: Session = Depends(get_db)
 ):
     account = _get_user_account(account_id, current_user["user_id"], db)
+    if _is_direct_bridge_account(account):
+        snapshot = get_account_snapshot(account.id) or {}
+        orders = snapshot.get("orders") if isinstance(snapshot.get("orders"), list) else []
+        return {"provider": "direct-mt5", "platform": "mt5", "broker_account_id": account.id, "orders": orders}
     try:
         orders = metaapi.get_orders(account.metaapi_account_id)
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
 
     return {
-        "provider": "metaapi",
+        "provider": "metaapi-optional",
         "platform": account.platform or "mt5",
         "broker_account_id": account.id,
         "orders": orders,
     }
-
 
 @router.get("/news")
 async def get_news(symbol: str | None = None, current_user: dict = Depends(_auth)):

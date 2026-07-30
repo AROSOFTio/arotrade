@@ -6,7 +6,7 @@ import os
 
 class Settings(BaseSettings):
     # App
-    APP_NAME: str = "AroTrade AI"
+    APP_NAME: str = "AroPilot AI"
     APP_ENV: str = "development"
     APP_URL: str = "https://arotrader.arosoftlabs.com"
     DEBUG: bool = False
@@ -101,7 +101,7 @@ class Settings(BaseSettings):
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
     SMTP_FROM_EMAIL: str = "noreply@arotrade.com"
-    SMTP_FROM_NAME: str = "AroTrade AI"
+    SMTP_FROM_NAME: str = "AroPilot AI"
     ENABLE_LIVE_TRADING: bool = True
     LIVE_TRADING_ALLOWED: bool = True
     NEW_LIVE_ENTRIES_ALLOWED: bool = True

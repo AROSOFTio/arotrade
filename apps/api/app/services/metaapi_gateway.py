@@ -178,7 +178,7 @@ def create_account(
         "magic": 0,
         "manualTrades": True,
         "region": settings.METAAPI_REGION or "london",
-        "keywords": ["AroTrade"],
+        "keywords": ["AroPilot"],
     }
     response = _request(
         "POST",
@@ -598,7 +598,7 @@ def place_market_order(
     stop_loss: float,
     take_profit: Optional[float] = None,
     client_id: str = "",
-    comment: str = "AroTrade signal",
+    comment: str = "AroPilot signal",
 ) -> dict:
     """
     Submit a market order.

@@ -226,7 +226,7 @@ async def stream_for_account(api: MetaApi, local_account: models.BrokerAccount):
 
 
 async def main():
-    logger.info("Starting AroTrader Market Streamer Daemon")
+    logger.info("Starting AroPilotr Market Streamer Daemon")
     if not settings.METAAPI_TOKEN:
         logger.error("METAAPI_TOKEN is not set. Exiting.")
         return

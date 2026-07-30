@@ -24,16 +24,16 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    logger.info("🚀 AroTrade AI API Starting...")
+    logger.info("🚀 AroPilot AI API Starting...")
     logger.info(f"Environment: {settings.APP_ENV}")
     logger.info(f"Database: {settings.POSTGRES_HOST}:{settings.POSTGRES_PORT}/{settings.POSTGRES_DB}")
     yield
     # Shutdown
-    logger.info("🛑 AroTrade AI API Shutting down...")
+    logger.info("🛑 AroPilot AI API Shutting down...")
 
 
 app = FastAPI(
-    title="AroTrade AI API",
+    title="AroPilot AI API",
     description="AI-Powered Trading Analysis and Execution Platform",
     version="1.0.0",
     lifespan=lifespan
@@ -87,7 +87,7 @@ app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 @app.get("/")
 async def root():
     return {
-        "app": "AroTrade AI",
+        "app": "AroPilot AI",
         "version": "1.0.0",
         "status": "running",
         "docs": "/docs",

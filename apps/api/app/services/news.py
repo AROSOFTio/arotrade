@@ -1,6 +1,6 @@
-"""Economic-calendar news feed (Forex Factory weekly JSON) + Gemini impact analysis.
+"""Economic-calendar news feed (Forex Factory weekly JSON) plus cached market-impact context.
 
-The calendar fetch is cached for an hour; AI impact summaries are cached per
+The calendar fetch is cached for an hour; Market-impact summaries are cached per
 symbol for an hour. Synthetic indices are unaffected by macro news and return
 an empty relevance set.
 """

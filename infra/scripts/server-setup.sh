@@ -1,11 +1,11 @@
 #!/bin/bash
-# AroTrade AI Server Setup Script
+# AroPilot AI Server Setup Script
 # Run this on a fresh Ubuntu 20.04+ server as root
 
 set -e
 
 echo "=========================================="
-echo "AroTrade AI - Server Setup"
+echo "AroPilot AI - Server Setup"
 echo "=========================================="
 
 # Update system

@@ -7,7 +7,7 @@ Each strategy is a Python class that:
 Strategies are registered in STRATEGY_REGISTRY.
 
 The engine calls all enabled strategies and returns the highest-confidence
-non-None result for Gemini validation.
+non-None result for AI validation.
 
 Adding a new strategy: create a class implementing BaseStrategy and add it
 to STRATEGY_REGISTRY.
@@ -42,11 +42,11 @@ class CandidateSignal:
     take_profit_2: Optional[float]
     take_profit_3: Optional[float]
     risk_reward: float
-    confidence: int         # 0–100 (strategy-level estimate, Gemini may adjust)
+    confidence: int         # 0–100 (strategy-level estimate, AI provider may adjust)
     strategy_id: str        # e.g. "ema_trend_pullback"
     strategy_name: str
     invalidation_condition: str
-    reasoning: list[str]   # Short factual observations for Gemini context
+    reasoning: list[str]   # Short factual observations for AI context
 
 
 class BaseStrategy(ABC):
@@ -67,7 +67,7 @@ class BaseStrategy(ABC):
         """
         Analyse the candle list and return a candidate signal or None.
 
-        Do NOT call Gemini here.  Gemini is called later by the pipeline.
+        Do not call an AI provider here. Provider validation runs later in the pipeline.
         """
         ...
 

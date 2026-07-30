@@ -91,6 +91,28 @@ def store_quote(account_id: int, payload: dict[str, Any]) -> None:
     client.publish(f"channel:quotes:{account_id}", json.dumps(data))
 
 
+
+def get_account_snapshot(account_id: int) -> dict[str, Any] | None:
+    raw = redis_client().get(f"mt5:account:{account_id}:snapshot")
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def get_quote(account_id: int, symbol: str) -> dict[str, Any] | None:
+    raw = redis_client().get(f"mt5:quote:{account_id}:{symbol.upper()}")
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
 def candles_key(account_id: int, symbol: str, timeframe: str) -> str:
     return f"mt5:candles:{account_id}:{symbol.upper()}:{timeframe.upper()}"
 

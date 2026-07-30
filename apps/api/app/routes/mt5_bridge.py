@@ -16,9 +16,6 @@ from app.services.mt5_bridge.store import (
 router = APIRouter()
 
 
-def bridge_key(x_aropilot_key: str | None, x_arotrader_key: str | None) -> str | None:
-    return x_aropilot_key or x_arotrader_key
-
 
 def _to_float(value) -> float | None:
     try:
@@ -110,13 +107,12 @@ def _latest_analysis_command(db: Session, account: models.BrokerAccount, symbol:
 async def bridge_heartbeat(
     payload: dict,
     x_aropilot_key: str | None = Header(default=None),
-    x_arotrader_key: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ):
     account_id = int(payload.get("account_id") or 0)
     if account_id <= 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="account_id is required")
-    account = require_bridge_account(db, bridge_key(x_aropilot_key, x_arotrader_key), account_id)
+    account = require_bridge_account(db, x_aropilot_key, account_id)
     account.connection_state = "direct_connected"
     account.broker = "direct-mt5"
     account.platform = "mt5"
@@ -137,11 +133,10 @@ async def bridge_heartbeat(
 async def bridge_quote(
     payload: dict,
     x_aropilot_key: str | None = Header(default=None),
-    x_arotrader_key: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ):
     account_id = int(payload.get("account_id") or 0)
-    account = require_bridge_account(db, bridge_key(x_aropilot_key, x_arotrader_key), account_id)
+    account = require_bridge_account(db, x_aropilot_key, account_id)
     store_quote(account.id, payload)
     return {"status": "ok"}
 
@@ -150,11 +145,10 @@ async def bridge_quote(
 async def bridge_candles(
     payload: dict,
     x_aropilot_key: str | None = Header(default=None),
-    x_arotrader_key: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ):
     account_id = int(payload.get("account_id") or 0)
-    account = require_bridge_account(db, bridge_key(x_aropilot_key, x_arotrader_key), account_id)
+    account = require_bridge_account(db, x_aropilot_key, account_id)
     symbol = str(payload.get("symbol") or "").upper().strip()
     timeframe = str(payload.get("timeframe") or "").upper().strip()
     candles = payload.get("candles") or []
@@ -171,10 +165,9 @@ async def read_bridge_candles(
     timeframe: str = "H1",
     count: int = Query(240, ge=1, le=1000),
     x_aropilot_key: str | None = Header(default=None),
-    x_arotrader_key: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ):
-    account = require_bridge_account(db, bridge_key(x_aropilot_key, x_arotrader_key), account_id)
+    account = require_bridge_account(db, x_aropilot_key, account_id)
     return {
         "provider": "direct-mt5",
         "account_id": account.id,
@@ -190,10 +183,9 @@ async def bridge_commands(
     symbol: str | None = None,
     timeframe: str | None = None,
     x_aropilot_key: str | None = Header(default=None),
-    x_arotrader_key: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ):
-    account = require_bridge_account(db, bridge_key(x_aropilot_key, x_arotrader_key), account_id)
+    account = require_bridge_account(db, x_aropilot_key, account_id)
     signal = _latest_signal_command(db, account)
     analysis = _latest_analysis_command(db, account, symbol, timeframe)
     return {

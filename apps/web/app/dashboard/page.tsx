@@ -75,7 +75,7 @@ export default function DashboardPage() {
       <PageHeader
         eyebrow="Trading operations"
         title="Workspace overview"
-        description="Review paper-trading readiness, current signals, and your risk limits in one place."
+        description="Review MT5 bridge readiness, current signals, and your risk limits in one place."
         actions={<Link href="/dashboard/signals" className="btn-primary">Review signals <ArrowRight size={16} aria-hidden="true" /></Link>}
       />
 
@@ -83,14 +83,14 @@ export default function DashboardPage() {
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Workspace summary">
         <div className="card">
-          <p className="text-xs font-semibold uppercase tracking-[0.06em] text-slate-500">Open paper trades</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.06em] text-slate-500">Open trades</p>
           <p className="mt-2 text-3xl font-bold text-slate-950">{loading ? '—' : openTrades}</p>
           <p className="mt-2 text-xs text-slate-500">Limit: {user?.max_open_trades ?? '—'} concurrent trades</p>
         </div>
         <div className="card">
           <p className="text-xs font-semibold uppercase tracking-[0.06em] text-slate-500">Signals in review</p>
           <p className="mt-2 text-3xl font-bold text-slate-950">{loading ? '—' : activeSignals}</p>
-          <p className="mt-2 text-xs text-slate-500">Approved signals can be checked for paper execution</p>
+          <p className="mt-2 text-xs text-slate-500">Approved signals can be checked for protected execution</p>
         </div>
         <div className="card">
           <p className="text-xs font-semibold uppercase tracking-[0.06em] text-slate-500">Total balance</p>
@@ -109,7 +109,7 @@ export default function DashboardPage() {
           <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
             <div>
               <h2 className="text-sm font-semibold text-slate-900">Recent signals</h2>
-              <p className="mt-1 text-xs text-slate-500">Only approved signals may move to paper execution.</p>
+              <p className="mt-1 text-xs text-slate-500">Only approved signals may move to protected execution.</p>
             </div>
             <Link href="/dashboard/signals" className="text-sm font-semibold text-[#2563eb] hover:text-[#1d4ed8]">Open signals</Link>
           </div>
@@ -133,7 +133,7 @@ export default function DashboardPage() {
               </table>
             </div>
           ) : (
-            <EmptyState icon={Sparkles} title="No signals yet" description="Create a signal with a defined entry, stop, target, and confidence score to begin paper validation." action={<Link href="/dashboard/signals" className="btn-secondary">Create signal</Link>} />
+            <EmptyState icon={Sparkles} title="No signals yet" description="Create a signal with a defined entry, stop, target, and confidence score to begin live-data validation." action={<Link href="/dashboard/signals" className="btn-secondary">Create signal</Link>} />
           )}
         </div>
 
@@ -141,7 +141,7 @@ export default function DashboardPage() {
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-[#2563eb]"><ShieldCheck size={20} aria-hidden="true" /></div>
           <h2 className="mt-4 text-base font-semibold text-slate-900">Execution protection</h2>
           <dl className="mt-4 space-y-3 text-sm">
-            <div className="flex justify-between gap-4 border-b border-slate-100 pb-3"><dt className="text-slate-500">Mode</dt><dd className="font-semibold text-[#1d4ed8]">Paper only</dd></div>
+            <div className="flex justify-between gap-4 border-b border-slate-100 pb-3"><dt className="text-slate-500">Mode</dt><dd className="font-semibold text-[#1d4ed8]">Protected mode</dd></div>
             <div className="flex justify-between gap-4 border-b border-slate-100 pb-3"><dt className="text-slate-500">Minimum confidence</dt><dd className="font-semibold text-slate-900">70%</dd></div>
             <div className="flex justify-between gap-4 border-b border-slate-100 pb-3"><dt className="text-slate-500">Minimum reward:risk</dt><dd className="font-semibold text-slate-900">1.5:1</dd></div>
             <div className="flex justify-between gap-4"><dt className="text-slate-500">Broker connection</dt><dd className="font-semibold text-slate-900">Locked</dd></div>
@@ -152,13 +152,13 @@ export default function DashboardPage() {
 
       <section className="mt-6 grid gap-4 md:grid-cols-3">
         <Link href="/dashboard/signals" className="card group transition-colors hover:border-blue-300">
-          <Radio size={20} className="text-[#2563eb]" aria-hidden="true" /><h2 className="mt-3 text-sm font-semibold text-slate-900">Manage signals</h2><p className="mt-1 text-sm leading-6 text-slate-500">Review entry conditions before simulated execution.</p>
+          <Radio size={20} className="text-[#2563eb]" aria-hidden="true" /><h2 className="mt-3 text-sm font-semibold text-slate-900">Manage signals</h2><p className="mt-1 text-sm leading-6 text-slate-500">Review entry conditions before protected execution.</p>
         </Link>
         <Link href="/dashboard/trades" className="card group transition-colors hover:border-blue-300">
-          <CircleDollarSign size={20} className="text-[#2563eb]" aria-hidden="true" /><h2 className="mt-3 text-sm font-semibold text-slate-900">Paper-trade ledger</h2><p className="mt-1 text-sm leading-6 text-slate-500">Track fills, open positions, and closed results.</p>
+          <CircleDollarSign size={20} className="text-[#2563eb]" aria-hidden="true" /><h2 className="mt-3 text-sm font-semibold text-slate-900">Trade ledger</h2><p className="mt-1 text-sm leading-6 text-slate-500">Track fills, open positions, and closed results.</p>
         </Link>
         <Link href="/dashboard/broker-accounts" className="card group transition-colors hover:border-blue-300">
-          <ShieldCheck size={20} className="text-[#2563eb]" aria-hidden="true" /><h2 className="mt-3 text-sm font-semibold text-slate-900">Demo accounts</h2><p className="mt-1 text-sm leading-6 text-slate-500">Keep demo-account context separate from execution credentials.</p>
+          <ShieldCheck size={20} className="text-[#2563eb]" aria-hidden="true" /><h2 className="mt-3 text-sm font-semibold text-slate-900">MT5 bridge</h2><p className="mt-1 text-sm leading-6 text-slate-500">Connect the MT5 Expert Advisor and stream live market intelligence.</p>
         </Link>
       </section>
     </>

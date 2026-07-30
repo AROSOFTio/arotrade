@@ -1,4 +1,4 @@
--- AroTrade AI Database Initialization
+-- AroPilot AI Database Initialization
 
 -- Create extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -26,7 +26,7 @@ CREATE TYPE trade_status AS ENUM (
 CREATE TYPE trading_mode AS ENUM ('demo', 'live');
 
 -- Create initial tables comment
-COMMENT ON DATABASE arotrade IS 'AroTrade AI - AI-Powered Trading Platform';
+COMMENT ON DATABASE arotrade IS 'AroPilot AI - AI-Powered Trading Platform';
 
 -- Grant permissions
 GRANT ALL PRIVILEGES ON DATABASE arotrade TO arotrade;

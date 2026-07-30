@@ -20,12 +20,12 @@ git config user.email "dev@arosoftlabs.com"
 git add .
 
 # Create initial commit
-git commit -m "Initial commit: AroTrade AI MVP
+git commit -m "Initial commit: AroPilot AI MVP
 
 - Complete FastAPI backend with SQLAlchemy ORM
 - Full Next.js 15 frontend
 - PostgreSQL + Redis + Celery
-- Gemini AI integration
+- Multi-AI provider integration
 - JWT authentication & role-based access
 - Admin dashboard with audit logs
 - Trading journal & backtesting

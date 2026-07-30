@@ -153,7 +153,6 @@ class AIAnalysisRequest(BaseModel):
     broker_account_id: int
     symbol: str
     timeframe: str
-    image_url: Optional[str] = None
     prompt: Optional[str] = None
 
 

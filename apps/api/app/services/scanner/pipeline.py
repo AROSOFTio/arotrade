@@ -2,15 +2,15 @@
 
 This is the main orchestration layer that runs on each new closed candle:
 
-1. Subscribe to broker quotes and candles (via MetaApi gateway)
+1. Subscribe to broker quotes and candles (via the configured broker data adapter)
 2. On new candle close:
    a. Pre-screen with deterministic TA (cheap, no AI)
-   b. If candidate found -> call Gemini for validation/explanation
-   c. Post-validate Gemini's response
+   b. If candidate found -> call AI provider for validation/explanation
+   c. Post-validate AI provider's response
    d. Create Signal record with fingerprint (idempotent)
    e. Create Notification
 3. Monitor approved signals for entry-zone price hits
-4. Never call Gemini on every tick - only on qualifying candidates
+4. Never call AI provider on every tick - only on qualifying candidates
 
 The pipeline is designed to run inside a Celery task or an asyncio loop
 so it does not block the API process.
@@ -52,8 +52,8 @@ def _call_ai_validation(
     """
     Call AI to validate a TA-discovered candidate.
 
-    Returns the parsed Gemini response dict or None if AI is unavailable.
-    Never lets Gemini override the numeric levels from the strategy engine.
+    Returns the parsed AI provider response dict or None if AI is unavailable.
+    Never lets AI provider override the numeric levels from the strategy engine.
     AI can:
       - Return buy/sell/hold (hold = reject)
       - Adjust confidence within +/-15 points
@@ -62,7 +62,7 @@ def _call_ai_validation(
       - Identify news risks
     """
     try:
-        from app.services.gemini import ai_health_details, run_chart_analysis, GeminiError, GeminiNotConfigured
+        from app.services.ai_runtime import ai_health_details, run_market_analysis, ProviderRuntimeError, ProviderRuntimeNotConfigured
         from app.services.metaapi_gateway import candles_to_prompt_context
     except ImportError:
         return None
@@ -97,14 +97,14 @@ def _call_ai_validation(
     )
 
     try:
-        result = run_chart_analysis(
+        result = run_market_analysis(
             symbol=symbol,
             timeframe=timeframe,
             prompt=scanner_prompt,
             price_context=price_context,
         )
         return result
-    except (GeminiNotConfigured, GeminiError) as exc:
+    except (ProviderRuntimeNotConfigured, ProviderRuntimeError) as exc:
         logger.warning("AI validation failed for %s %s: %s", symbol, timeframe, exc)
         return None
     except Exception as exc:
@@ -174,7 +174,7 @@ def run_scanner_pipeline(
     )
 
     # -----------------------------------------------------------------------
-    # Step 3: Pre-screen (fast check before Gemini)
+    # Step 3: Pre-screen (fast check before AI provider)
     # -----------------------------------------------------------------------
     closes = [c["close"] for c in candles]
     rsi_val = rsi(closes, 14)
@@ -230,7 +230,7 @@ def run_scanner_pipeline(
     # -----------------------------------------------------------------------
     # Step 5: AI validation
     # -----------------------------------------------------------------------
-    gemini_result = _call_ai_validation(
+    ai_result = _call_ai_validation(
         candidate, candles, symbol, timeframe, bid, ask
     )
 
@@ -243,33 +243,33 @@ def run_scanner_pipeline(
     invalidation = candidate.invalidation_condition
     final_direction = candidate.direction
 
-    if gemini_result:
-        gemini_signal = gemini_result.get("signal", "hold")
-        if gemini_signal == "hold":
+    if ai_result:
+        provider_signal = ai_result.get("signal", "hold")
+        if provider_signal == "hold":
             logger.info(
                 "AI validation returned hold for %s %s - signal rejected", symbol, timeframe
             )
             return None
 
-        # Gemini must agree on direction
-        if gemini_signal != candidate.direction:
+        # AI provider must agree on direction
+        if provider_signal != candidate.direction:
             logger.info(
                 "AI validation disagrees with strategy direction (%s vs %s) for %s %s",
-                gemini_signal, candidate.direction, symbol, timeframe,
+                provider_signal, candidate.direction, symbol, timeframe,
             )
             return None
 
-        # Adjust confidence (strategy confidence +/- Gemini delta, capped to max +/-15)
-        gemini_conf = gemini_result.get("confidence", confidence)
-        delta = max(-15, min(15, gemini_conf - candidate.confidence))
+        # Adjust confidence (strategy confidence +/- AI provider delta, capped to max +/-15)
+        provider_conf = ai_result.get("confidence", confidence)
+        delta = max(-15, min(15, provider_conf - candidate.confidence))
         confidence = max(0, min(100, candidate.confidence + delta))
 
-        if gemini_result.get("reasoning"):
-            reasoning.extend(gemini_result["reasoning"])
-        if gemini_result.get("news_warning"):
-            news_warning = gemini_result["news_warning"]
-        if gemini_result.get("invalidation"):
-            invalidation = gemini_result["invalidation"]
+        if ai_result.get("reasoning"):
+            reasoning.extend(ai_result["reasoning"])
+        if ai_result.get("news_warning"):
+            news_warning = ai_result["news_warning"]
+        if ai_result.get("invalidation"):
+            invalidation = ai_result["invalidation"]
 
     # -----------------------------------------------------------------------
     # Step 7: Post-validate merged candidate

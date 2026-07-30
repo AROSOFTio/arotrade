@@ -1,1 +1,1 @@
-# AroTrade AI API package
+# AroPilot AI API package

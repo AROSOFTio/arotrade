@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from app import models, schemas
 from app.database import get_db
@@ -10,11 +10,11 @@ from app.services import metaapi_gateway as metaapi
 from app.services.analysis_engine import market_snapshot
 from app.services.mt5_bridge.store import get_candles as get_bridge_candles
 from app.services.ai.provider_manager import provider_manager
-from app.services.gemini import (
-    GeminiError,
-    GeminiNotConfigured,
+from app.services.ai_runtime import (
+    ProviderRuntimeError,
+    ProviderRuntimeNotConfigured,
     answer_analysis_question,
-    run_chart_analysis,
+    run_market_analysis,
 )
 
 router = APIRouter()
@@ -59,8 +59,6 @@ def _account_market_snapshot(account: models.BrokerAccount, symbol: str, timefra
         return "\n".join(lines), market_snapshot(symbol, timeframe, candles)
     return None, None
 
-ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp"}
-MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
 
 def _get_quote_and_candle_metrics(db: Session, broker_account_id: int, symbol: str, timeframe: str) -> dict:
@@ -147,13 +145,13 @@ def _persist_analysis(
 
 def _run_or_raise(**kwargs) -> dict:
     try:
-        return run_chart_analysis(**kwargs)
-    except GeminiNotConfigured:
+        return run_market_analysis(**kwargs)
+    except ProviderRuntimeNotConfigured:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="AI service not configured"
         )
-    except GeminiError as exc:
+    except ProviderRuntimeError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"AI analysis failed: {exc}"
@@ -184,7 +182,7 @@ async def compare_ai_models(
     if not account or (not account.metaapi_account_id and account.broker != "direct-mt5"):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Active MetaApi account or direct MT5 bridge account not found",
+            detail="Active direct MT5 bridge account not found",
         )
 
     price_context, deterministic = _account_market_snapshot(account, request.symbol, request.timeframe)
@@ -207,7 +205,7 @@ async def analyze_chart(
     current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Analyze a market using Gemini AI, anchored to live candles when the symbol has a feed."""
+    """Analyze a market from live MT5 candles through the provider framework."""
     account = db.query(models.BrokerAccount).filter(
         models.BrokerAccount.id == request.broker_account_id,
         models.BrokerAccount.user_id == current_user["user_id"],
@@ -216,7 +214,7 @@ async def analyze_chart(
     if not account or (not account.metaapi_account_id and account.broker != "direct-mt5"):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Active MetaApi account or direct MT5 bridge account not found"
+            detail="Active direct MT5 bridge account not found"
         )
 
     price_context, deterministic = _account_market_snapshot(account, request.symbol, request.timeframe)
@@ -235,67 +233,6 @@ async def analyze_chart(
         request.prompt,
         result,
         request.broker_account_id,
-    )
-
-
-@router.post("/analyze-image", response_model=schemas.AIAnalysisResponse)
-async def analyze_image_upload(
-    file: UploadFile = File(...),
-    broker_account_id: int = Form(...),
-    symbol: str = Form(...),
-    timeframe: str = Form(...),
-    prompt: str = Form(default=""),
-    current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Analyze an uploaded chart screenshot with Gemini vision."""
-    if file.content_type not in ALLOWED_IMAGE_TYPES:
-        raise HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail="Upload a PNG, JPEG or WebP chart screenshot"
-        )
-
-    image_bytes = await file.read()
-    if len(image_bytes) > MAX_IMAGE_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="Chart image must be 8 MB or smaller"
-        )
-    if not image_bytes:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Uploaded file is empty"
-        )
-
-    account = db.query(models.BrokerAccount).filter(
-        models.BrokerAccount.id == broker_account_id,
-        models.BrokerAccount.user_id == current_user["user_id"],
-        models.BrokerAccount.is_active == True,
-    ).first()
-    if not account or (not account.metaapi_account_id and account.broker != "direct-mt5"):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Active MetaApi account or direct MT5 bridge account not found"
-        )
-
-    price_context, deterministic = _account_market_snapshot(account, symbol, timeframe)
-    result = _run_or_raise(
-        symbol=symbol,
-        timeframe=timeframe,
-        prompt=prompt or None,
-        image_bytes=image_bytes,
-        image_mime=file.content_type,
-        price_context=price_context,
-        deterministic_analysis=deterministic,
-    )
-    return _persist_analysis(
-        db,
-        current_user["user_id"],
-        symbol,
-        timeframe,
-        prompt or None,
-        result,
-        broker_account_id,
     )
 
 
@@ -332,25 +269,35 @@ async def signal_of_the_day(
     account = db.query(models.BrokerAccount).filter(
         models.BrokerAccount.user_id == current_user["user_id"],
         models.BrokerAccount.is_active == True,
-        models.BrokerAccount.connection_state == "deployed",
+        models.BrokerAccount.broker == "direct-mt5",
+        models.BrokerAccount.connection_state == "direct_connected",
     ).first()
-    if not account or not account.metaapi_account_id:
+    if not account:
+        account = db.query(models.BrokerAccount).filter(
+            models.BrokerAccount.user_id == current_user["user_id"],
+            models.BrokerAccount.is_active == True,
+            models.BrokerAccount.connection_state == "deployed",
+            models.BrokerAccount.metaapi_account_id.isnot(None),
+        ).first()
+    if not account:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="No deployed and active broker account found to scan for Signal of the Day"
+            detail="No active MT5 bridge account found to scan for Signal of the Day"
         )
 
-    # Build a multi-market context and let the model pick one setup
     sections = []
     for candidate in SOTD_CANDIDATES:
-        context = _live_context(account.metaapi_account_id, candidate, "H4")
+        context, deterministic = _account_market_snapshot(account, candidate, "H4")
         if context:
-            # Keep each market compact so the combined prompt stays small
             lines = context.splitlines()
-            sections.append(f"### {candidate} (H4)\n" + "\n".join([lines[0]] + lines[-60:]))
+            sections.append(
+                f"### {candidate} (H4)\n"
+                + "\n".join([lines[0]] + lines[-60:])
+                + "\nDeterministic snapshot: "
+                + str(deterministic or {})
+            )
     if not sections:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Market data feed unavailable")
-
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="MT5 market data feed unavailable")
     selection_prompt = (
         "You are given live H4 candles for several markets. Pick the SINGLE best "
         "risk-defined setup right now among them and produce your analysis for that "
@@ -423,9 +370,9 @@ async def chat_about_analysis(
 
     try:
         answer = answer_analysis_question(summary, history, question)
-    except GeminiNotConfigured:
+    except ProviderRuntimeNotConfigured:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="AI service not configured")
-    except GeminiError as exc:
+    except ProviderRuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"AI chat failed: {exc}")
 
     return {"answer": answer}

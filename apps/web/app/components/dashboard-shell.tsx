@@ -55,7 +55,7 @@ const navigation: NavigationItem[] = [
   { href: '/dashboard', label: 'Overview', icon: LayoutDashboard },
   { href: '/dashboard/markets', label: 'Markets', icon: Activity },
   { href: '/dashboard/signals', label: 'Signals', icon: Sparkles },
-  { href: '/dashboard/trades', label: 'Paper trades', icon: CandlestickChart },
+  { href: '/dashboard/trades', label: 'Trades', icon: CandlestickChart },
   { href: '/dashboard/strategy-builder', label: 'Strategies', icon: Network },
   { href: '/dashboard/backtesting', label: 'Backtesting', icon: LineChart },
   { href: '/dashboard/ai-analysis', label: 'AI analysis', icon: Bot },
@@ -151,9 +151,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     <div className="flex h-full flex-col bg-white">
       <div className="flex h-[72px] items-center justify-between border-b border-slate-200 px-5">
         <Link href="/dashboard" className="flex items-center gap-3" onClick={() => setIsMobileNavOpen(false)}>
-          <img src="/logo.png" alt="AroTrader logo" className="h-9 w-9" />
+          <img src="/logo.png" alt="AroPilot logo" className="h-9 w-9" />
           <span>
-            <span className="block text-sm font-bold text-slate-950">AroTrader</span>
+            <span className="block text-sm font-bold text-slate-950">AroPilot</span>
             <span className="block text-[11px] font-medium text-slate-500">by AROFi</span>
           </span>
         </Link>
@@ -188,7 +188,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
       <div className="border-t border-slate-200 p-3">
         <div className={`mb-3 flex items-center gap-2 rounded-md px-3 py-2 text-xs font-semibold ${executionBadgeClass}`}>
           <ShieldCheck size={16} aria-hidden="true" />
-          {isLiveMode ? 'Live execution enabled' : 'Paper execution only'}
+          {isLiveMode ? 'Live execution enabled' : 'Protected execution'}
         </div>
         <button type="button" onClick={signOut} className="flex h-10 w-full items-center gap-3 rounded-md px-3 text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-950">
           <LogOut size={18} aria-hidden="true" />
@@ -221,7 +221,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
             </button>
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-slate-900">{activePage}</p>
-              <p className="hidden text-xs text-slate-500 sm:block">AroTrader workspace</p>
+              <p className="hidden text-xs text-slate-500 sm:block">AroPilot workspace</p>
             </div>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
@@ -284,7 +284,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
         <footer className="border-t border-slate-200 bg-white px-4 py-4 text-xs text-slate-500 sm:px-6 lg:px-8">
           <div className="mx-auto flex max-w-[1600px] flex-col justify-between gap-1 sm:flex-row sm:items-center">
-            <span>© {new Date().getFullYear()} AROFi. {isLiveMode ? 'AroTrader live execution is enabled.' : 'AroTrader is operating in paper mode.'}</span>
+            <span>© {new Date().getFullYear()} AROFi. {isLiveMode ? 'AroPilot live execution is enabled.' : 'AroPilot is operating in protected mode.'}</span>
             <span>{isLiveMode ? 'Risk controls still apply to every live order.' : 'Live execution unlocks when a broker adapter is connected.'}</span>
           </div>
         </footer>

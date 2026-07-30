@@ -1,4 +1,4 @@
-# Caddy reverse proxy configuration for AroTrade AI
+# Caddy reverse proxy configuration for AroPilot AI
 
 {$DOMAIN:localhost} {
     # Encode response

@@ -1,7 +1,7 @@
 {
-  "name": "AroTrader AI",
-  "short_name": "AroTrader",
-  "description": "AI-powered trading intelligence: analysis, signals, paper trading and risk controls.",
+  "name": "AroPilot AI",
+  "short_name": "AroPilot",
+  "description": "AI-powered trading intelligence: live MT5 analysis, AI consensus, signals and risk controls.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Create an admin user for AroTrade AI.
+Create an admin user for AroPilot AI.
 Run this script after migrations are applied.
 
 Usage:
@@ -23,7 +23,7 @@ from app.auth import hash_password, validate_password
 def create_admin():
     """Create admin user interactively."""
     print("\n" + "="*50)
-    print("AroTrade AI - Admin User Creation")
+    print("AroPilot AI - Admin User Creation")
     print("="*50 + "\n")
 
     # Get input

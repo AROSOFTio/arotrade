@@ -1,10 +1,10 @@
 """Deterministic signal validation.
 
 This validator runs TWICE:
-  1. BEFORE Gemini — to pre-screen candidates (fast, cheap)
-  2. AFTER Gemini  — to validate the AI's proposed levels
+  1. BEFORE AI — to pre-screen candidates (fast, cheap)
+  2. AFTER AI  — to validate the AI's proposed levels
 
-Gemini must NEVER be the sole authority for numeric levels.
+AI must NEVER be the sole authority for numeric levels.
 These rules are hard gates; a signal that fails any of them is rejected.
 """
 
@@ -55,7 +55,7 @@ def validate_signal_candidate(
     """
     Full deterministic validation of a signal candidate.
 
-    This is the gate that runs after Gemini returns its analysis.
+    This is the gate that runs after AI returns its analysis.
     It must reject anything that could lead to a bad order.
     """
     r = ValidationResult(passed=True)
@@ -166,11 +166,11 @@ def pre_screen_candidate(
     min_confidence_for_scan: int = 60,
 ) -> ValidationResult:
     """
-    Cheap pre-screen BEFORE calling Gemini.
+    Cheap pre-screen BEFORE calling AI.
 
     This runs on every candle close and filters out setups that have no
     chance of passing validation. Only candidates that pass here get sent
-    to Gemini (controlling API costs).
+    to AI (controlling API costs).
     """
     r = ValidationResult(passed=True)
 
@@ -180,7 +180,7 @@ def pre_screen_candidate(
             # Neutral RSI — no strong bias
             r.fail("RSI is in neutral zone (45-55) — no directional conviction")
 
-    # Spread filter (before Gemini call)
+    # Spread filter (before AI provider call)
     if max_spread_points is not None and spread_points is not None:
         if spread_points > max_spread_points * 1.5:
             r.fail(

@@ -4,7 +4,7 @@ from sqlalchemy import text
 from app import models
 from app.schemas import HealthResponse, AIHealthResponse
 from app.config import settings
-from app.services.gemini import ai_health_details
+from app.services.ai_runtime import ai_health_details
 
 router = APIRouter()
 
@@ -52,7 +52,7 @@ async def version():
     """Get API version."""
     return {
         "version": "1.0.0",
-        "app": "AroTrade AI",
+        "app": "AroPilot AI",
         "environment": settings.APP_ENV
     }
 
