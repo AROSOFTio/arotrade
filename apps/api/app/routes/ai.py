@@ -8,7 +8,7 @@ from app.database import get_db
 from app.config import settings
 from app.services import metaapi_gateway as metaapi
 from app.services.analysis_engine import market_snapshot
-from app.services.mt5_bridge.store import get_candles as get_bridge_candles
+from app.services.mt5_bridge.store import get_account_snapshot, get_candles as get_bridge_candles
 from app.services.ai.provider_manager import provider_manager
 from app.services.ai_runtime import (
     ProviderRuntimeError,
@@ -114,6 +114,7 @@ def _persist_analysis(
 
     analysis = models.AIAnalysis(
         user_id=user_id,
+        broker_account_id=broker_account_id,
         symbol=symbol.upper(),
         timeframe=timeframe,
         prompt=prompt,
@@ -336,6 +337,40 @@ async def signal_of_the_day(
     return analysis
 
 
+
+def _analysis_live_context(db: Session, analysis: models.AIAnalysis) -> str:
+    if not analysis.broker_account_id:
+        return "Live account context: no broker account is attached to this analysis."
+    account = db.query(models.BrokerAccount).filter(
+        models.BrokerAccount.id == analysis.broker_account_id,
+        models.BrokerAccount.user_id == analysis.user_id,
+        models.BrokerAccount.is_active == True,
+    ).first()
+    if not account:
+        return "Live account context: broker account is no longer active."
+    parts = [
+        "Live account context:",
+        f"Account: {account.name or account.account_id} | provider {account.broker} | {account.account_type} | state {account.connection_state}",
+        f"Balance: {account.balance or 0} {account.currency or 'USD'}",
+    ]
+    if account.broker == "direct-mt5" or account.connection_state == "direct_connected":
+        snapshot = get_account_snapshot(account.id) or {}
+        positions = snapshot.get("positions") if isinstance(snapshot.get("positions"), list) else []
+        orders = snapshot.get("orders") if isinstance(snapshot.get("orders"), list) else []
+        parts.append(f"EA snapshot received: {snapshot.get('received_at') or 'unavailable'}")
+        parts.append(f"Open MT5 positions: {len(positions)} | pending orders: {len(orders)}")
+        for position in positions[:5]:
+            if isinstance(position, dict):
+                parts.append(
+                    "Position: "
+                    + f"{position.get('symbol', 'UNKNOWN')} {position.get('type') or position.get('direction') or ''} "
+                    + f"volume {position.get('volume') or position.get('lots') or '-'} "
+                    + f"profit {position.get('profit') or position.get('unrealizedProfit') or position.get('floatingProfit') or 0}"
+                )
+    else:
+        parts.append("Optional MetaApi adapter account; live snapshot is pulled through adapter-specific endpoints.")
+    return "\n".join(parts)
+
 @router.post("/analyses/{analysis_id}/chat")
 async def chat_about_analysis(
     analysis_id: int,
@@ -365,7 +400,8 @@ async def chat_about_analysis(
         f"| reward:risk {analysis.risk_reward}\n"
         f"Reasoning: {'; '.join(analysis.reasoning or [])}\n"
         f"Invalidation: {analysis.invalidation}\n"
-        f"Risk warning: {analysis.risk_warning or '-'}"
+        f"Risk warning: {analysis.risk_warning or '-'}\n"
+        f"{_analysis_live_context(db, analysis)}"
     )
 
     try:

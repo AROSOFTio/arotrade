@@ -158,6 +158,7 @@ class AIAnalysisRequest(BaseModel):
 
 class AIAnalysisResponse(BaseModel):
     id: int
+    broker_account_id: Optional[int] = None
     symbol: str
     timeframe: str
     bias: str

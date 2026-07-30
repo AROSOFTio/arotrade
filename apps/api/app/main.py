@@ -8,7 +8,7 @@ from datetime import datetime
 from app.config import settings
 from app.database import engine, SessionLocal
 from app import models
-from app.routes import auth, signals, ai, strategies, backtest, trades, orders, journal, admin, broker_accounts, health, notifications, market, scanner, mt5_bridge
+from app.routes import auth, signals, ai, strategies, backtest, trades, orders, journal, admin, broker_accounts, health, notifications, market, scanner, mt5_bridge, portfolio
 
 # Configure logging
 logging.basicConfig(
@@ -80,6 +80,7 @@ app.include_router(notifications.router, prefix="/api/notifications", tags=["Not
 app.include_router(market.router, prefix="/api/market", tags=["Market Data"])
 app.include_router(mt5_bridge.router, prefix="/api/mt5/bridge", tags=["MT5 Bridge"])
 app.include_router(scanner.router, prefix="/api/scanner", tags=["Scanner"])
+app.include_router(portfolio.router, prefix="/api/portfolio", tags=["Portfolio"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 
 

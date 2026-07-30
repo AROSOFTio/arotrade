@@ -13,5 +13,17 @@ class FrontendRiskWarningContractTests(unittest.TestCase):
         self.assertNotIn("previewData.warnings", source)
 
 
+
+    def test_portfolio_page_uses_real_summary_endpoint_and_sidebar_link(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        page = (repo_root / "apps" / "web" / "app" / "dashboard" / "portfolio" / "page.tsx").read_text(encoding="utf-8")
+        shell = (repo_root / "apps" / "web" / "app" / "components" / "dashboard-shell.tsx").read_text(encoding="utf-8")
+
+        self.assertIn("/portfolio/summary", page)
+        self.assertIn("equity_estimate", page)
+        self.assertIn("exposure_by_symbol", page)
+        self.assertNotIn("Coming Soon", page)
+        self.assertIn("/dashboard/portfolio", shell)
+
 if __name__ == "__main__":
     unittest.main()

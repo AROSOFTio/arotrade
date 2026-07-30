@@ -195,6 +195,7 @@ class AIAnalysis(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    broker_account_id = Column(Integer, ForeignKey("broker_accounts.id"), nullable=True, index=True)
     symbol = Column(String(20), nullable=False)
     timeframe = Column(String(10), nullable=False)
     prompt = Column(Text, nullable=True)
