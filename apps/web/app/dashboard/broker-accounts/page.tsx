@@ -105,6 +105,21 @@ export default function BrokerAccountsPage() {
       setMessage('Direct MT5 bridge created. Paste the endpoint, account id and bridge key into the MT5 Expert Advisor.')
     } catch (requestError) { setError(errorMessage(requestError)) } finally { setSubmitting(false) }
   }
+  const showDirectBridgeInputs = async (account: BrokerAccount) => {
+    setError('')
+    setMessage('')
+    setBusyId(account.id)
+    try {
+      const response = await apiRequest<{ account_id: number; api_key: string; endpoint: string }>(`/broker-accounts/direct-mt5/${account.id}/credentials`)
+      setBridgeKey(response.api_key)
+      setBridgeAccountId(response.account_id)
+      setBridgeEndpoint(response.endpoint)
+      setMessage('EA inputs loaded. Copy them into the AroPilotEA Inputs tab in MetaTrader.')
+      window.setTimeout(() => {
+        document.getElementById('ea-inputs-card')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }, 50)
+    } catch (requestError) { setError(errorMessage(requestError)) } finally { setBusyId(null) }
+  }
   const accountAction = async (accountId: number, action: 'deploy' | 'undeploy' | 'state' | 'deactivate' | 'reactivate') => {
     setError('')
     setMessage('')
@@ -177,8 +192,9 @@ export default function BrokerAccountsPage() {
             </div>
             <button type="submit" disabled={submitting} className="btn-primary mt-5 w-full">{submitting ? 'Creating...' : 'Create direct MT5 bridge'}</button>
             <a href="/mt5/AroPilotMT5Connector.zip" download className="mt-3 flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"><Download size={15} /> Download MT5 connector</a>
-            {bridgeKey && <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+            {bridgeKey && <div id="ea-inputs-card" className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
               <div className="font-bold">EA inputs</div>
+              <p className="mt-1 text-[11px] leading-5 text-emerald-800">Paste these values into the AroPilotEA Inputs tab. AccountId must not be 0.</p>
               <div className="mt-2 space-y-1 font-mono break-all">
                 <div>BridgeUrl={bridgeEndpoint}</div>
                 <div>AccountId={bridgeAccountId}</div>
@@ -260,7 +276,12 @@ export default function BrokerAccountsPage() {
                         </button>
                       </>
                     ) : account.broker === 'direct-mt5' ? (
-                      <span className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${stateTone(account.connection_state)}`}>{account.connection_state || 'waiting_for_ea'}</span>
+                      <>
+                        <span className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${stateTone(account.connection_state)}`}>{account.connection_state || 'waiting_for_ea'}</span>
+                        <button type="button" disabled={busyId === account.id} onClick={() => void showDirectBridgeInputs(account)} className="btn-secondary min-h-8 px-3 py-1 text-xs">
+                          <Copy size={13} aria-hidden="true" /> Show EA inputs
+                        </button>
+                      </>
                     ) : account.metaapi_account_id ? (
                       <>
                         <span className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${stateTone(account.connection_state)}`}>{account.connection_state || 'unknown'}</span>

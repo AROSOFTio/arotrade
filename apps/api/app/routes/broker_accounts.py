@@ -165,6 +165,49 @@ async def create_direct_mt5_bridge(
         "ea_file": "/mt5/AroPilotEA.mq5",
     }
 
+
+@router.get("/direct-mt5/{account_id}/credentials")
+async def get_direct_mt5_bridge_credentials(
+    account_id: int,
+    current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return the EA inputs for an existing direct MT5 bridge.
+
+    Bridge API keys are account-scoped and only returned to the authenticated
+    owner of the broker account, so users can recover EA inputs after MT5 loses
+    settings or the EA is re-attached.
+    """
+    account = _get_user_account(account_id, current_user["user_id"], db)
+    if account.broker != "direct-mt5":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="EA inputs are only available for direct MT5 bridge accounts",
+        )
+    key = db.query(models.APIKey).filter(
+        models.APIKey.user_id == current_user["user_id"],
+        models.APIKey.broker_account_id == account.id,
+        models.APIKey.is_active == True,  # noqa: E712
+    ).order_by(models.APIKey.created_at.desc()).first()
+    if not key:
+        raw_key = "arot_" + secrets.token_urlsafe(32)
+        key = models.APIKey(
+            user_id=current_user["user_id"],
+            broker_account_id=account.id,
+            key=raw_key,
+            name=f"MT5 Bridge - {account.name or account.account_id}",
+            is_active=True,
+        )
+        db.add(key)
+        db.commit()
+        db.refresh(key)
+    return {
+        "account_id": account.id,
+        "api_key": key.key,
+        "endpoint": "https://arotrader.arosoftlabs.com/api/mt5/bridge",
+        "ea_file": "/mt5/AroPilotEA.mq5",
+    }
+
 @router.post("", response_model=schemas.BrokerAccountResponse, status_code=status.HTTP_201_CREATED)
 async def add_demo_broker_account(
     account_data: schemas.BrokerAccountCreate,
