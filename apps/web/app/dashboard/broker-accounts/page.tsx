@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { Copy, Download, Landmark, Link2, PlugZap, Power, RefreshCw, Rocket, Square } from 'lucide-react'
+import { Copy, Download, Landmark, Link2, PlugZap, Power, RefreshCw, Rocket, RotateCcw, Square, Trash2 } from 'lucide-react'
 
 import { apiRequest, errorMessage, formatDate, formatNumber } from '../../components/api'
 import { EmptyState } from '../../components/empty-state'
@@ -105,7 +105,7 @@ export default function BrokerAccountsPage() {
       setMessage('Direct MT5 bridge created. Paste the endpoint, account id and bridge key into the MT5 Expert Advisor.')
     } catch (requestError) { setError(errorMessage(requestError)) } finally { setSubmitting(false) }
   }
-  const accountAction = async (accountId: number, action: 'deploy' | 'undeploy' | 'state' | 'deactivate') => {
+  const accountAction = async (accountId: number, action: 'deploy' | 'undeploy' | 'state' | 'deactivate' | 'reactivate') => {
     setError('')
     setMessage('')
     setBusyId(accountId)
@@ -116,6 +116,21 @@ export default function BrokerAccountsPage() {
       if (action === 'deploy') setMessage('Deploying — the broker connection usually takes 1–3 minutes. Use Refresh to check.')
       if (action === 'undeploy') setMessage('Undeploying — hourly billing stops once undeployed.')
       if (action === 'state') setMessage('State refreshed.')
+      if (action === 'deactivate') setMessage('Account deactivated. Any hosted adapter is being undeployed.')
+      if (action === 'reactivate') setMessage('Account reactivated.')
+    } catch (requestError) { setError(errorMessage(requestError)) } finally { setBusyId(null) }
+  }
+
+  const deleteAccount = async (account: BrokerAccount) => {
+    const label = account.name || account.account_id
+    if (!window.confirm(`Delete “${label}”? Historical trades and analyses will be retained, but this connection cannot be restored.`)) return
+    setError('')
+    setMessage('')
+    setBusyId(account.id)
+    try {
+      await apiRequest<{ status: string; account_id: number }>(`/broker-accounts/${account.id}`, { method: 'DELETE' })
+      setAccounts((current) => current.filter((item) => item.id !== account.id))
+      setMessage('Broker account deleted.')
     } catch (requestError) { setError(errorMessage(requestError)) } finally { setBusyId(null) }
   }
 
@@ -237,7 +252,14 @@ export default function BrokerAccountsPage() {
                     <p className="mt-1 text-xs text-slate-500">Added {formatDate(account.created_at)}</p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    {account.broker === 'direct-mt5' ? (
+                    {!account.is_active ? (
+                      <>
+                        <StatusBadge value="inactive" />
+                        <button type="button" disabled={busyId === account.id} onClick={() => void accountAction(account.id, 'reactivate')} className="btn-secondary min-h-8 px-3 py-1 text-xs">
+                          <RotateCcw size={13} aria-hidden="true" /> Reactivate
+                        </button>
+                      </>
+                    ) : account.broker === 'direct-mt5' ? (
                       <span className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${stateTone(account.connection_state)}`}>{account.connection_state || 'waiting_for_ea'}</span>
                     ) : account.metaapi_account_id ? (
                       <>
@@ -259,10 +281,13 @@ export default function BrokerAccountsPage() {
                       <StatusBadge value={account.is_active ? 'active' : 'inactive'} />
                     )}
                     {account.is_active && (
-                      <button type="button" onClick={() => void accountAction(account.id, 'deactivate')} className="icon-button h-8 w-8 text-slate-600" title="Deactivate account">
-                        <Power size={14} aria-hidden="true" />
+                      <button type="button" disabled={busyId === account.id} onClick={() => void accountAction(account.id, 'deactivate')} className="btn-secondary min-h-8 px-3 py-1 text-xs">
+                        <Power size={13} aria-hidden="true" /> Deactivate
                       </button>
                     )}
+                    <button type="button" disabled={busyId === account.id} onClick={() => void deleteAccount(account)} className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-red-200 bg-white px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-50">
+                      <Trash2 size={13} aria-hidden="true" /> Delete
+                    </button>
                   </div>
                 </div>
               ))}

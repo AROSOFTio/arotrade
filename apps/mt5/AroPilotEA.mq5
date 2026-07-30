@@ -1,5 +1,5 @@
 #property strict
-#property version   "1.0.0"
+#property version   "1.00"
 #property description "AroPilot AI direct MT5 bridge. Streams market/account data, receives analysis, draws chart levels, and executes guarded commands when enabled."
 #include "config.mqh"
 #include "connector.mqh"

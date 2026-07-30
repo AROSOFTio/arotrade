@@ -73,10 +73,12 @@ string BuildHistoryJson(int maxDeals=20)
 
 string BuildHeartbeatJson(long accountId)
 {
+   string accountType = AccountInfoInteger(ACCOUNT_TRADE_MODE) == ACCOUNT_TRADE_MODE_REAL ? "live" : "demo";
    return "{"
       + "\"account_id\":" + IntegerToString(accountId) + ","
       + "\"login\":\"" + IntegerToString((int)AccountInfoInteger(ACCOUNT_LOGIN)) + "\","
       + "\"server\":\"" + JsonEscape(AccountInfoString(ACCOUNT_SERVER)) + "\","
+      + "\"account_type\":\"" + accountType + "\","
       + "\"balance\":" + DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2) + ","
       + "\"equity\":" + DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2) + ","
       + "\"margin\":" + DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN), 2) + ","

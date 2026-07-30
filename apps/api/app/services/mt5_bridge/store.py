@@ -29,6 +29,8 @@ def authenticate_bridge_key(db: Session, api_key: str | None) -> models.APIKey:
 
 def require_bridge_account(db: Session, api_key: str | None, account_id: int) -> models.BrokerAccount:
     key_record = authenticate_bridge_key(db, api_key)
+    if key_record.broker_account_id not in (None, account_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Bridge key is not valid for this account")
     account = db.query(models.BrokerAccount).filter(
         models.BrokerAccount.id == account_id,
         models.BrokerAccount.user_id == key_record.user_id,
@@ -36,7 +38,18 @@ def require_bridge_account(db: Session, api_key: str | None, account_id: int) ->
     ).first()
     if not account:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bridge account not found")
+    if key_record.broker_account_id is None:
+        # One-time binding safely scopes bridge keys created before migration 011.
+        key_record.broker_account_id = account.id
     return account
+
+
+def delete_account_data(account_id: int) -> None:
+    client = redis_client()
+    keys = list(client.scan_iter(match=f"mt5:*:{account_id}:*"))
+    keys.extend(client.scan_iter(match=f"mt5:account:{account_id}:snapshot"))
+    if keys:
+        client.delete(*set(keys))
 
 
 def normalise_candle(raw: dict[str, Any]) -> dict[str, Any]:

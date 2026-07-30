@@ -1,6 +1,7 @@
 from __future__ import annotations
 from datetime import datetime
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi.routing import APIRoute
 from sqlalchemy.orm import Session
 from app import models
 from app.database import get_db
@@ -11,7 +12,32 @@ from app.services.mt5_bridge.store import (
     store_candles,
     store_quote,
 )
-router = APIRouter()
+
+
+def _trim_mt5_json_body(body: bytes) -> bytes:
+    return body.rstrip(b"\x00")
+
+
+class MT5BridgeRoute(APIRoute):
+    """Normalize the terminal NUL emitted by MT5's working WebRequest form."""
+
+    def get_route_handler(self):
+        original_route_handler = super().get_route_handler()
+
+        async def bridge_route_handler(request: Request):
+            if request.method == "POST":
+                body = await request.body()
+                trimmed = _trim_mt5_json_body(body)
+                if trimmed != body:
+                    # Starlette caches the body here; normal FastAPI parsing and
+                    # validation still run after this bridge-only normalization.
+                    request._body = trimmed
+            return await original_route_handler(request)
+
+        return bridge_route_handler
+
+
+router = APIRouter(route_class=MT5BridgeRoute)
 def _to_float(value) -> float | None:
     try:
         if value is None:
@@ -130,6 +156,10 @@ async def bridge_heartbeat(
         account.account_id = str(payload["login"])
     if payload.get("server"):
         account.server = str(payload["server"])
+    if payload.get("account_type") == "live":
+        account.account_type = models.TradingMode.LIVE
+    elif payload.get("account_type") == "demo":
+        account.account_type = models.TradingMode.DEMO
     if payload.get("balance") is not None:
         account.balance = float(payload.get("balance") or 0)
     if payload.get("currency"):

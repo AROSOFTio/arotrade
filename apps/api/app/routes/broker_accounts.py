@@ -109,6 +109,19 @@ async def create_direct_mt5_bridge(
     account_type = str(payload.get("account_type") or "demo").lower()
     if account_type not in {"demo", "live"}:
         account_type = "demo"
+    if login and login != "pending":
+        existing = db.query(models.BrokerAccount).filter(
+            models.BrokerAccount.user_id == current_user["user_id"],
+            models.BrokerAccount.broker == "direct-mt5",
+            models.BrokerAccount.account_id == login,
+            models.BrokerAccount.server == server,
+            models.BrokerAccount.is_active == True,  # noqa: E712
+        ).first()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="An active direct bridge already exists for this MT5 login and server",
+            )
 
     account = models.BrokerAccount(
         user_id=current_user["user_id"],
@@ -129,6 +142,7 @@ async def create_direct_mt5_bridge(
     raw_key = "arot_" + secrets.token_urlsafe(32)
     api_key = models.APIKey(
         user_id=current_user["user_id"],
+        broker_account_id=account.id,
         key=raw_key,
         name=f"MT5 Bridge - {name}",
         is_active=True,
@@ -346,17 +360,91 @@ async def deactivate_broker_account(
     current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
     db: Session = Depends(get_db),
 ):
-    account = db.query(models.BrokerAccount).filter(
-        models.BrokerAccount.id == account_id,
-        models.BrokerAccount.user_id == current_user["user_id"],
-    ).first()
-    if not account:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Broker account not found")
-
+    account = _get_user_account(account_id, current_user["user_id"], db)
+    if account.metaapi_account_id:
+        try:
+            remote = metaapi.get_account(account.metaapi_account_id)
+            if metaapi.account_state(remote) in {"deployed", "deploying"}:
+                metaapi.undeploy_account(account.metaapi_account_id)
+                account.connection_state = "undeploying"
+        except metaapi.MetaApiError as exc:
+            raise _metaapi_error(exc)
     account.is_active = False
     db.commit()
     db.refresh(account)
     return account
+
+
+@router.post("/{account_id}/reactivate", response_model=schemas.BrokerAccountResponse)
+async def reactivate_broker_account(
+    account_id: int,
+    current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
+    db: Session = Depends(get_db),
+):
+    account = _get_user_account(account_id, current_user["user_id"], db)
+    account.is_active = True
+    if account.broker == "direct-mt5":
+        account.connection_state = "waiting_for_ea"
+    elif account.metaapi_account_id:
+        try:
+            remote = metaapi.get_account(account.metaapi_account_id)
+            _apply_remote_state(account, remote)
+        except metaapi.MetaApiError as exc:
+            raise _metaapi_error(exc)
+    db.commit()
+    db.refresh(account)
+    return account
+
+
+@router.delete("/{account_id}", status_code=status.HTTP_200_OK)
+async def delete_broker_account(
+    account_id: int,
+    current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Remove an account while retaining trade and analysis audit history."""
+    account = _get_user_account(account_id, current_user["user_id"], db)
+    if account.metaapi_account_id:
+        try:
+            remote = metaapi.get_account(account.metaapi_account_id)
+            if metaapi.account_state(remote) in {"deployed", "deploying"}:
+                metaapi.undeploy_account(account.metaapi_account_id)
+            metaapi.remove_account(account.metaapi_account_id)
+        except metaapi.MetaApiError as exc:
+            raise _metaapi_error(exc)
+
+    # Preserve historical records, but detach them from the removed account.
+    nullable_references = (
+        models.AIAnalysis,
+        models.Signal,
+        models.Trade,
+        models.ScannerProfile,
+        models.ExecutionIntent,
+    )
+    for model in nullable_references:
+        values = {model.broker_account_id: None}
+        if model is models.ScannerProfile:
+            values[model.scan_enabled] = False
+        db.query(model).filter(model.broker_account_id == account.id).update(
+            values,
+            synchronize_session=False,
+        )
+    db.query(models.BrokerSymbol).filter(
+        models.BrokerSymbol.broker_account_id == account.id,
+    ).delete(synchronize_session=False)
+    db.query(models.APIKey).filter(
+        models.APIKey.broker_account_id == account.id,
+    ).delete(synchronize_session=False)
+    db.delete(account)
+    db.commit()
+
+    try:
+        from app.services.mt5_bridge.store import delete_account_data
+        delete_account_data(account_id)
+    except Exception:
+        # Redis is an expiring cache; database deletion must remain authoritative.
+        pass
+    return {"status": "deleted", "account_id": account_id}
 
 
 @router.post("/{account_id}/reconcile")

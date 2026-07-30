@@ -120,6 +120,7 @@ class APIKey(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    broker_account_id = Column(Integer, ForeignKey("broker_accounts.id"), nullable=True, index=True)
     key = Column(String(255), unique=True, index=True, nullable=False)
     name = Column(String(255), nullable=False)
     is_active = Column(Boolean, default=True)

@@ -1,5 +1,5 @@
 #property strict
-#property version   "1.0.0"
+#property version   "1.00"
 #property description "AroPilot AI direct MT5 bridge. Streams market/account data, receives analysis, draws chart levels, and executes guarded commands when enabled."
 
 #include "config.mqh"
@@ -69,7 +69,26 @@ void PollCommands()
    string url = BridgeUrl + "/commands?account_id=" + IntegerToString(AccountId) + "&symbol=" + _Symbol + "&timeframe=" + TfToText(_Period);
    if(!HttpGet(url, ApiKey, response)) return;
    DrawAnalysisFromJson(response);
-   ExecuteCommandFromJson(response, EnableAutoTrading, MaxLotsPerTrade, MaxOpenTrades, MaxDailyLossPercent);
+   string commandId = JsonStringValue(response, "command_id", "");
+   ulong orderTicket = 0;
+   ulong dealTicket = 0;
+   int retcode = 0;
+   string message = "";
+   bool executed = ExecuteCommandFromJson(response, EnableAutoTrading, MaxLotsPerTrade, MaxOpenTrades, MaxDailyLossPercent, orderTicket, dealTicket, retcode, message);
+   if(commandId != "")
+   {
+      string ack = "{"
+         + "\"account_id\":" + IntegerToString(AccountId) + ","
+         + "\"command_id\":\"" + JsonEscape(commandId) + "\","
+         + "\"success\":" + (executed ? "true" : "false") + ","
+         + "\"order_ticket\":" + IntegerToString((long)orderTicket) + ","
+         + "\"deal_ticket\":" + IntegerToString((long)dealTicket) + ","
+         + "\"retcode\":" + IntegerToString(retcode) + ","
+         + "\"message\":\"" + JsonEscape(message) + "\""
+         + "}";
+      string ackResponse = "";
+      HttpPostJson(BridgeUrl + "/command-result", ApiKey, ack, ackResponse);
+   }
 }
 
 void SendSnapshot()
