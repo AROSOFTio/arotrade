@@ -68,12 +68,11 @@ def run_all_scanner_profiles(self):
 
 
 def _scan_profile(db, profile):
-    """Process one ScannerProfile: iterate symbols × timeframes."""
+    """Process one ScannerProfile: iterate symbols and timeframes."""
     from app import models
-    from app.services.metaapi_gateway import (
-        get_candles, get_symbol_price, normalize_timeframe,
-        extract_observed_price, MetaApiError,
-    )
+    from app.services import metaapi_gateway as metaapi
+    from app.services.metaapi_gateway import MetaApiError
+    from app.services.mt5_bridge.store import get_candles as get_bridge_candles, get_quote as get_bridge_quote
     from app.services.scanner.pipeline import run_scanner_pipeline
     from app.services.scanner.indicators import spread_in_points
     from app.services.broker_symbol_sync import needs_symbol_sync, sync_broker_symbols_for_account
@@ -85,31 +84,35 @@ def _scan_profile(db, profile):
     account = None
     if profile.broker_account_id:
         account = db.query(models.BrokerAccount).filter(
-            models.BrokerAccount.id == profile.broker_account_id
+            models.BrokerAccount.id == profile.broker_account_id,
+            models.BrokerAccount.is_active == True,
         ).first()
 
-    if not account or account.connection_state != "deployed" or not account.metaapi_account_id:
+    if not account:
         logger.debug("Profile %d: broker account not ready", profile.id)
+        return
+
+    is_direct = account.broker == "direct-mt5" or account.connection_state == "direct_connected"
+    if not is_direct and (account.connection_state != "deployed" or not account.metaapi_account_id):
+        logger.debug("Profile %d: optional MetaApi adapter account not ready", profile.id)
         return
 
     symbols = profile.symbols or []
     timeframes = profile.timeframes or ["H1"]
 
-    if symbols and needs_symbol_sync(db, profile.broker_account_id, symbols):
+    if not is_direct and symbols and needs_symbol_sync(db, profile.broker_account_id, symbols):
         sync_result = sync_broker_symbols_for_account(db, account, preferred_symbols=symbols)
         if sync_result.synced:
             db.commit()
 
-    # Build symbol → broker_symbol map from BrokerSymbol table
-    broker_symbol_map = {}
-    if symbols:
+    broker_symbol_map = {symbol: symbol for symbol in symbols}
+    if symbols and not is_direct:
         broker_symbols_db = db.query(models.BrokerSymbol).filter(
             models.BrokerSymbol.broker_account_id == profile.broker_account_id,
             models.BrokerSymbol.canonical_symbol.in_(symbols),
-            models.BrokerSymbol.trade_allowed == True,  # noqa: E712
+            models.BrokerSymbol.trade_allowed == True,
         ).all()
-        for bs in broker_symbols_db:
-            broker_symbol_map[bs.canonical_symbol] = bs.broker_symbol
+        broker_symbol_map = {bs.canonical_symbol: bs.broker_symbol for bs in broker_symbols_db}
 
     for symbol in symbols:
         broker_sym = broker_symbol_map.get(symbol)
@@ -122,18 +125,17 @@ def _scan_profile(db, profile):
             )
             continue
 
-        try:
-            # Get current quote
-            quote = get_symbol_price(
-                account.metaapi_account_id,
-                broker_sym,
-                require_fresh=True,
-            )
-        except MetaApiError as exc:
-            logger.warning(
-                "Profile %d: cannot get quote for %s: %s", profile.id, broker_sym, exc
-            )
-            continue
+        if is_direct:
+            quote = get_bridge_quote(account.id, broker_sym) or get_bridge_quote(account.id, symbol)
+            if not quote:
+                logger.debug("Profile %d: no direct MT5 quote for %s", profile.id, broker_sym)
+                continue
+        else:
+            try:
+                quote = metaapi.get_symbol_price(account.metaapi_account_id, broker_sym, require_fresh=True)
+            except MetaApiError as exc:
+                logger.warning("Profile %d: cannot get quote for %s: %s", profile.id, broker_sym, exc)
+                continue
 
         bid = float(quote.get("bid") or quote.get("brokerBid") or 0)
         ask = float(quote.get("ask") or quote.get("brokerAsk") or 0)
@@ -144,23 +146,20 @@ def _scan_profile(db, profile):
         sp = spread_in_points(bid, ask, point) if point > 0 else None
 
         for timeframe in timeframes:
-            mt_tf = normalize_timeframe(timeframe)
             try:
-                candles = get_candles(
-                    account.metaapi_account_id, broker_sym, mt_tf, count=250
-                )
+                if is_direct:
+                    candles = get_bridge_candles(account.id, broker_sym, timeframe, count=250)
+                    if not candles and broker_sym != symbol:
+                        candles = get_bridge_candles(account.id, symbol, timeframe, count=250)
+                else:
+                    mt_tf = metaapi.normalize_timeframe(timeframe)
+                    candles = metaapi.get_candles(account.metaapi_account_id, broker_sym, mt_tf, count=250)
             except MetaApiError as exc:
-                logger.warning(
-                    "Profile %d: cannot get candles for %s %s: %s",
-                    profile.id, broker_sym, timeframe, exc,
-                )
+                logger.warning("Profile %d: cannot get candles for %s %s: %s", profile.id, broker_sym, timeframe, exc)
                 continue
 
             if len(candles) < 50:
-                logger.debug(
-                    "Profile %d: insufficient candles for %s %s (%d)",
-                    profile.id, symbol, timeframe, len(candles),
-                )
+                logger.debug("Profile %d: insufficient candles for %s %s (%d)", profile.id, symbol, timeframe, len(candles))
                 continue
 
             run_scanner_pipeline(
@@ -175,7 +174,6 @@ def _scan_profile(db, profile):
                 spread_points=sp,
                 user=user,
             )
-
 
 @celery_app.task(
     name="app.workers.scanner_tasks.run_single_profile",
