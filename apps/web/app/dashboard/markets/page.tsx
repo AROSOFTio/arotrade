@@ -330,6 +330,7 @@ export default function MarketsPage() {
       layout: {
         background: { color: dark ? '#2d3033' : '#ffffff' },
         textColor: dark ? '#a1abb1' : '#334155',
+        attributionLogo: false,
       },
       grid: {
         vertLines: { color: dark ? '#3d4246' : '#f1f5f9' },
@@ -753,7 +754,7 @@ export default function MarketsPage() {
             )}
           </div>
           <p className="border-t border-slate-100 px-5 py-2.5 text-xs text-slate-400">
-            MT5 live feed · updates every 30s · quotes every 10s · support/resistance auto-drawn
+            Source: Xness MT5 EA live candles - no TradingView data - candles update every 30s - quotes every 10s - support/resistance auto-drawn
           </p>
           <div className="border-t border-slate-100 px-5 py-4">
             <div className="flex items-center justify-between gap-3">
