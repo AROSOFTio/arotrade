@@ -15,6 +15,9 @@ from app.services.mt5_bridge.store import (
 )
 
 
+MT5_MAX_SR_LEVELS = 8
+
+
 def _trim_mt5_json_body(body: bytes) -> bytes:
     return body.rstrip(b"\x00")
 
@@ -78,15 +81,76 @@ def _deterministic_chart_objects(account: models.BrokerAccount, symbol: str | No
             broker_symbol=symbol.upper(),
             timeframe=timeframe.upper(),
             candles=candles,
-            include="all",
+            include="support_resistance",
         )
     except Exception:
         return []
-    return [
-        drawing.model_dump(mode="json")
+
+    current_price = analysis.market_state.current_price or candles[-1].get("close") or 0
+    support = None
+    resistance = None
+    for finding in analysis.experts[0].findings if analysis.experts else []:
+        if finding.price is None:
+            continue
+        if finding.price < current_price and (support is None or finding.price > support.price):
+            support = finding
+        if finding.price > current_price and (resistance is None or finding.price < resistance.price):
+            resistance = finding
+
+    def _price_of(drawing) -> float:
+        for value in (drawing.price_start, drawing.price_end, drawing.price_high, drawing.price_low):
+            if isinstance(value, (int, float)) and value > 0:
+                return float(value)
+        return 0.0
+
+    sr_lines = [
+        drawing
         for drawing in analysis.drawings
         if getattr(drawing, "enabled", True)
-    ][:80]
+        and drawing.type == "horizontal_line"
+        and (drawing.metadata or {}).get("expert") == "support_resistance"
+        and _price_of(drawing) > 0
+    ]
+    sr_lines = sorted(sr_lines, key=lambda drawing: abs(_price_of(drawing) - float(current_price or 0)))[:MT5_MAX_SR_LEVELS]
+
+    trade_levels = []
+    if analysis.signal.action in ("BUY", "SELL"):
+        trade_levels = [
+            drawing
+            for drawing in analysis.drawings
+            if getattr(drawing, "enabled", True)
+            and drawing.type in {"entry_zone", "stop_loss", "take_profit", "signal_marker"}
+        ][:5]
+
+    next_step = "WAIT: no clean trade yet. Watch reaction at nearest support/resistance."
+    if analysis.signal.action in ("BUY", "SELL"):
+        next_step = (
+            f"{analysis.signal.action}: wait for confirmation in the entry zone. "
+            f"SL {analysis.signal.stop_loss or '-'} TP {analysis.signal.take_profit_1 or '-'}."
+        )
+    text_lines = [
+        f"AroPilot {symbol.upper()} {timeframe.upper()}",
+        next_step,
+    ]
+    if support:
+        text_lines.append(f"Support: {support.price:.2f} ({support.label})")
+    if resistance:
+        text_lines.append(f"Resistance: {resistance.price:.2f} ({resistance.label})")
+    if analysis.experts:
+        text_lines.append(f"S/R score: {analysis.experts[0].score}/100")
+
+    text_object = {
+        "type": "text_label",
+        "id": f"{symbol}:{timeframe}:aropilot-plan",
+        "label": "\\n".join(text_lines[:5]),
+        "price": current_price,
+        "confidence": analysis.experts[0].score if analysis.experts else analysis.signal.confidence,
+    }
+
+    objects = [text_object]
+    objects.extend(drawing.model_dump(mode="json") for drawing in sr_lines)
+    objects.extend(drawing.model_dump(mode="json") for drawing in trade_levels)
+    return objects[:14]
 
 
 def _latest_signal_command(db: Session, account: models.BrokerAccount) -> dict | None:

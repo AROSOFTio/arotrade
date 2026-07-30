@@ -16,6 +16,21 @@ void DrawHorizontalLevel(string name, double price, color lineColor, string labe
    if(label != "") ObjectSetString(0, obj, OBJPROP_TEXT, label);
 }
 
+void DrawTextPanel(string name, string label)
+{
+   if(label == "") return;
+   string obj = "AroPilot_" + name;
+   if(ObjectFind(0, obj) < 0)
+      ObjectCreate(0, obj, OBJ_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, obj, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, obj, OBJPROP_XDISTANCE, 12);
+   ObjectSetInteger(0, obj, OBJPROP_YDISTANCE, 28);
+   ObjectSetInteger(0, obj, OBJPROP_COLOR, clrBlack);
+   ObjectSetInteger(0, obj, OBJPROP_FONTSIZE, 9);
+   ObjectSetString(0, obj, OBJPROP_FONT, "Arial");
+   ObjectSetString(0, obj, OBJPROP_TEXT, label);
+}
+
 void DrawArrow(string name, datetime when, double price, bool buy)
 {
    if(price <= 0) return;
@@ -103,6 +118,12 @@ void DrawChartObjectJson(string objectJson, int index)
    string id = SafeDrawingName(type + "_" + IntegerToString(index), JsonStringValue(objectJson, "id", ""));
    string label = JsonStringValue(objectJson, "label", type);
    color colorValue = DrawingColor(type);
+
+   if(type == "text_label")
+   {
+      DrawTextPanel(id, label);
+      return;
+   }
 
    if(type == "horizontal_line" || type == "stop_loss" || type == "take_profit")
    {

@@ -144,18 +144,81 @@ def _persist_analysis(
     return analysis
 
 
+def _deterministic_analysis_fallback(symbol: str, timeframe: str, prompt, deterministic: dict | None, error: Exception) -> dict:
+    snapshot = deterministic or {}
+    latest = snapshot.get("latest_candle") if isinstance(snapshot.get("latest_candle"), dict) else {}
+    structure = snapshot.get("structure") if isinstance(snapshot.get("structure"), dict) else {}
+
+    def _safe_float_list(values) -> list[float]:
+        levels: list[float] = []
+        for value in values or []:
+            try:
+                levels.append(float(value))
+            except (TypeError, ValueError):
+                continue
+        return levels
+
+    support_levels = _safe_float_list(structure.get("support"))
+    resistance_levels = _safe_float_list(structure.get("resistance"))
+    try:
+        current_price = float(latest.get("close") or 0)
+    except (TypeError, ValueError):
+        current_price = 0.0
+    nearest_support = max([value for value in support_levels if not current_price or value < current_price], default=None)
+    nearest_resistance = min([value for value in resistance_levels if not current_price or value > current_price], default=None)
+    trend = str(snapshot.get("trend") or "sideways")
+    reasoning = [
+        "Cloud/local AI provider failed, so AroPilot used deterministic MT5 market data instead.",
+        f"Trend is currently {trend}.",
+    ]
+    if nearest_support:
+        reasoning.append(f"Nearest support to watch: {nearest_support:.5f}.")
+    if nearest_resistance:
+        reasoning.append(f"Nearest resistance to watch: {nearest_resistance:.5f}.")
+    reasoning.append("Next action: wait for a clean candle reaction or breakout before preparing a trade.")
+    raw = {
+        "fallback": "deterministic",
+        "provider_error": str(error)[:500],
+        "prompt": prompt,
+        "snapshot": snapshot,
+    }
+    return {
+        "bias": "neutral" if trend == "sideways" else ("bullish" if trend == "bullish" else "bearish"),
+        "signal": "hold",
+        "confidence": 35,
+        "entry_min": 0.0,
+        "entry_max": 0.0,
+        "stop_loss": 0.0,
+        "take_profit_1": None,
+        "take_profit_2": None,
+        "take_profit_3": None,
+        "risk_reward": 0.0,
+        "reasoning": reasoning,
+        "invalidation": "A valid trade requires fresh confirmation at a mapped support/resistance level.",
+        "news_warning": None,
+        "risk_warning": "No trade prepared. This is a deterministic fallback because configured AI providers were unavailable.",
+        "raw": raw,
+    }
+
+
 def _run_or_raise(**kwargs) -> dict:
     try:
         return run_market_analysis(**kwargs)
-    except ProviderRuntimeNotConfigured:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="AI service not configured"
+    except ProviderRuntimeNotConfigured as exc:
+        return _deterministic_analysis_fallback(
+            kwargs.get("symbol", ""),
+            kwargs.get("timeframe", ""),
+            kwargs.get("prompt"),
+            kwargs.get("deterministic_analysis"),
+            exc,
         )
     except ProviderRuntimeError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"AI analysis failed: {exc}"
+        return _deterministic_analysis_fallback(
+            kwargs.get("symbol", ""),
+            kwargs.get("timeframe", ""),
+            kwargs.get("prompt"),
+            kwargs.get("deterministic_analysis"),
+            exc,
         )
 
 

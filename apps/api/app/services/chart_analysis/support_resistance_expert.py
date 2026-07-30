@@ -54,9 +54,9 @@ def _line_style(kind: str, direction: str) -> dict:
         "line_color": color,
         "fill_color": "#ffffff",
         "text_color": color,
-        "line_width": 1 if kind != "pivot" else 2,
+        "line_width": 1,
         "line_style": "dashed" if kind != "psychological" else "dotted",
-        "opacity": 0.32,
+        "opacity": 0.16,
     }
 
 
@@ -321,7 +321,7 @@ def run_support_resistance_expert(
     candles: list[ChartCandle],
     structure: StructureSnapshot,
     created_at: datetime,
-    max_drawings: int = 28,
+    max_drawings: int = 14,
 ) -> tuple[ExpertReport, list[HorizontalLineDrawing]]:
     current_price = structure.current_price or candles[-1].close
     atr_value = structure.atr or max((item.high - item.low for item in candles[-20:]), default=current_price * 0.001)

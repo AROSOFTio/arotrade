@@ -156,6 +156,8 @@ class Settings(BaseSettings):
     def validate_production_secrets(self):
         if self.APP_ENV.strip().lower() != "production":
             return self
+        if not str(self.OLLAMA_BASE_URL or "").strip():
+            self.OLLAMA_BASE_URL = "http://ollama:11434"
 
         placeholders = (
             "change_me",

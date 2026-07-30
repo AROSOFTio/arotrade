@@ -135,9 +135,10 @@ class AIProviderManager:
             for item in settings.AI_PROVIDER_ORDER.split(",")
             if item.strip()
         ]
+        local_first = ["ollama", "lmstudio"]
         defaults = ["ollama", "lmstudio", "gemini", "openrouter", "openai", "claude", "deepseek", "qwen", "grok"]
         result: list[AIProvider] = []
-        for provider_id in requested + defaults:
+        for provider_id in local_first + requested + defaults:
             provider = self._providers.get(provider_id)
             if provider and provider not in result and (include_unconfigured or provider.is_configured()):
                 result.append(provider)
