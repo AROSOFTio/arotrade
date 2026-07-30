@@ -11,7 +11,7 @@ input string BridgeUrl = AROPILOT_DEFAULT_BRIDGE_URL;
 input string WebSocketUrl = "";
 input string ApiKey = "";
 input long AccountId = 0;
-input int SendIntervalSeconds = 10;
+input int SendIntervalSeconds = 2;
 input int CandleBars = 240;
 input int MaxSymbolsToStream = 8;
 input bool EnableAutoTrading = false;
@@ -24,7 +24,7 @@ datetime g_lastCandle = 0;
 int g_failureCount = 0;
 int OnInit()
 {
-   EventSetTimer(MathMax(5, SendIntervalSeconds));
+   EventSetTimer(MathMax(1, SendIntervalSeconds));
    if(ApiKey == "" || AccountId <= 0)
    {
       PanelDrawStatus("missing ApiKey or AccountId");

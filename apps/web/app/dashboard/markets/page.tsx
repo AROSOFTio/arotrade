@@ -616,7 +616,7 @@ export default function MarketsPage() {
     const interval = window.setInterval(() => {
       void loadPositions()
       void loadAccountState()
-    }, 15000)
+    }, 5000)
     return () => window.clearInterval(interval)
   }, [loadPositions, loadAccountState, selectedAccountId])
   const handlePreview = async () => {
@@ -699,23 +699,21 @@ export default function MarketsPage() {
           stop_loss: Number(body.stop_loss),
           take_profit: body.take_profit != null ? Number(body.take_profit) : undefined,
           profit: 0,
-          status: res.execution_status || 'sent_to_mt5',
+          status: res.execution_status || 'mt5_sent',
         },
         ...current,
       ].slice(0, 5))
-      setExecutionSuccess('Order sent to MT5 EA. Waiting for the next MT5 heartbeat to confirm the live position.')
+      setExecutionSuccess('Order sent to MT5. The EA is confirming it now.')
       setPreviewData(null)
       setShowConfirmModal(false)
       void loadPositions()
       void loadAccountState()
-      window.setTimeout(() => {
-        void loadPositions()
-        void loadAccountState()
-      }, 4000)
-      window.setTimeout(() => {
-        void loadPositions()
-        void loadAccountState()
-      }, 10000)
+      ;[1000, 2000, 3000, 5000, 8000].forEach((delay) => {
+        window.setTimeout(() => {
+          void loadPositions()
+          void loadAccountState()
+        }, delay)
+      })
     } catch (e) {
       setError(errorMessage(e))
       setShowConfirmModal(false)
@@ -1219,8 +1217,8 @@ export default function MarketsPage() {
                           <td className="px-3 py-2 uppercase text-slate-600">{side}</td>
                           <td className="px-3 py-2 tabular-nums text-slate-700">{formatNumber(Number(position.volume ?? 0), 2)}</td>
                           <td className="px-3 py-2">
-                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${isPending ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
-                              {isPending ? 'Waiting MT5' : 'Live MT5'}
+                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${isPending ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
+                              {isPending ? 'Sent MT5' : 'Live MT5'}
                             </span>
                           </td>
                           <td className={`px-3 py-2 font-bold tabular-nums ${profit >= 0 ? 'text-[#15803d]' : 'text-[#b91c1c]'}`}>

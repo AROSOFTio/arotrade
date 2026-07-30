@@ -96,19 +96,27 @@ string BuildHeartbeatJson(long accountId)
 string BuildQuoteJson(long accountId)
 {
    MqlTick tick;
-   SymbolInfoTick(_Symbol, tick);
+   bool hasTick = SymbolInfoTick(_Symbol, tick);
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-   double spread = point > 0 ? (tick.ask - tick.bid) / point : 0;
+   double bid = hasTick ? tick.bid : SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double ask = hasTick ? tick.ask : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   if(bid <= 0) bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   if(ask <= 0) ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   if(bid <= 0 || ask <= 0) return "";
+   double last = hasTick && tick.last > 0 ? tick.last : bid;
+   double volume = hasTick ? tick.volume_real : 0.0;
+   datetime tickTime = hasTick && tick.time > 0 ? (datetime)tick.time : TimeCurrent();
+   double spread = point > 0 ? (ask - bid) / point : 0;
    return "{"
       + "\"account_id\":" + IntegerToString(accountId) + ","
       + "\"symbol\":\"" + JsonEscape(_Symbol) + "\","
       + "\"timeframe\":\"" + TfToText(_Period) + "\","
-      + "\"bid\":" + DoubleToString(tick.bid, _Digits) + ","
-      + "\"ask\":" + DoubleToString(tick.ask, _Digits) + ","
-      + "\"last\":" + DoubleToString(tick.last, _Digits) + ","
-      + "\"volume\":" + DoubleToString(tick.volume_real, 2) + ","
+      + "\"bid\":" + DoubleToString(bid, _Digits) + ","
+      + "\"ask\":" + DoubleToString(ask, _Digits) + ","
+      + "\"last\":" + DoubleToString(last, _Digits) + ","
+      + "\"volume\":" + DoubleToString(volume, 2) + ","
       + "\"spread\":" + DoubleToString(spread, 1) + ","
-      + "\"time\":\"" + TimeToIso((datetime)tick.time) + "\""
+      + "\"time\":\"" + TimeToIso(tickTime) + "\""
       + "}";
 }
 

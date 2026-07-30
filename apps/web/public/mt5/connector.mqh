@@ -120,20 +120,28 @@ string BuildQuoteJson(long accountId, string symbol="")
 {
    string quoteSymbol = symbol == "" ? _Symbol : symbol;
    MqlTick tick;
-   if(!SymbolInfoTick(quoteSymbol, tick)) return "";
+   bool hasTick = SymbolInfoTick(quoteSymbol, tick);
    int digits = (int)SymbolInfoInteger(quoteSymbol, SYMBOL_DIGITS);
    double point = SymbolInfoDouble(quoteSymbol, SYMBOL_POINT);
-   double spread = point > 0 ? (tick.ask - tick.bid) / point : 0;
+   double bid = hasTick ? tick.bid : SymbolInfoDouble(quoteSymbol, SYMBOL_BID);
+   double ask = hasTick ? tick.ask : SymbolInfoDouble(quoteSymbol, SYMBOL_ASK);
+   if(bid <= 0) bid = SymbolInfoDouble(quoteSymbol, SYMBOL_BID);
+   if(ask <= 0) ask = SymbolInfoDouble(quoteSymbol, SYMBOL_ASK);
+   if(bid <= 0 || ask <= 0) return "";
+   double last = hasTick && tick.last > 0 ? tick.last : bid;
+   double volume = hasTick ? tick.volume_real : 0.0;
+   datetime tickTime = hasTick && tick.time > 0 ? (datetime)tick.time : TimeCurrent();
+   double spread = point > 0 ? (ask - bid) / point : 0;
    return "{"
       + "\"account_id\":" + IntegerToString(accountId) + ","
       + "\"symbol\":\"" + JsonEscape(quoteSymbol) + "\","
       + "\"timeframe\":\"" + TfToText(_Period) + "\","
-      + "\"bid\":" + DoubleToString(tick.bid, digits) + ","
-      + "\"ask\":" + DoubleToString(tick.ask, digits) + ","
-      + "\"last\":" + DoubleToString(tick.last, digits) + ","
-      + "\"volume\":" + DoubleToString(tick.volume_real, 2) + ","
+      + "\"bid\":" + DoubleToString(bid, digits) + ","
+      + "\"ask\":" + DoubleToString(ask, digits) + ","
+      + "\"last\":" + DoubleToString(last, digits) + ","
+      + "\"volume\":" + DoubleToString(volume, 2) + ","
       + "\"spread\":" + DoubleToString(spread, 1) + ","
-      + "\"time\":\"" + TimeToIso((datetime)tick.time) + "\""
+      + "\"time\":\"" + TimeToIso(tickTime) + "\""
       + "}";
 }
 

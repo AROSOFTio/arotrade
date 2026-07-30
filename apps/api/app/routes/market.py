@@ -71,6 +71,37 @@ def _quote_age_seconds(value: str | None) -> float:
     except Exception:
         return 0.0
 
+
+def _latest_candle_quote(account_id: int, broker_symbol: str) -> dict | None:
+    latest: dict | None = None
+    latest_ts: datetime | None = None
+    for timeframe in ("M1", "M5", "M15", "M30", "H1"):
+        candles = get_bridge_candles(account_id, broker_symbol, timeframe, 1)
+        if not candles:
+            continue
+        candle = candles[-1]
+        close = float(candle.get("close") or 0.0)
+        if close <= 0:
+            continue
+        raw_time = candle.get("time") or candle.get("brokerTime") or candle.get("timestamp")
+        parsed_time = None
+        if raw_time:
+            try:
+                parsed_time = datetime.fromisoformat(str(raw_time).replace("Z", "+00:00"))
+            except Exception:
+                parsed_time = None
+        if latest is None or (parsed_time and (latest_ts is None or parsed_time > latest_ts)):
+            latest_ts = parsed_time
+            latest = {
+                "symbol": broker_symbol.upper(),
+                "bid": close,
+                "ask": close,
+                "spread": 0.0,
+                "time": raw_time or "",
+                "source": "latest_mt5_candle_close",
+            }
+    return latest
+
 def _resolve_analysis_symbol(
     db: Session,
     account: models.BrokerAccount,
@@ -238,8 +269,12 @@ async def get_symbol_quote(
     account = _get_user_account(account_id, current_user["user_id"], db)
     _require_direct_bridge_account(account)
     quote = get_bridge_quote(account.id, broker_symbol)
+    fallback = False
     if not quote:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No direct MT5 quote has been received for this symbol")
+        quote = _latest_candle_quote(account.id, broker_symbol)
+        fallback = True
+    if not quote:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No direct MT5 quote or candle data has been received for this symbol")
     bid = float(quote.get("bid") or quote.get("brokerBid") or 0.0)
     ask = float(quote.get("ask") or quote.get("brokerAsk") or 0.0)
     spread = float(quote.get("spread") or (ask - bid if ask and bid else 0.0))
@@ -255,7 +290,8 @@ async def get_symbol_quote(
         "spread": spread,
         "quote_timestamp": quote_time_str,
         "quote_age": age,
-        "is_live_data": age <= settings.QUOTE_STALE_AFTER_SECONDS,
+        "is_live_data": (not fallback) and age <= settings.QUOTE_STALE_AFTER_SECONDS,
+        "fallback_quote": fallback,
         "connection_state": account.connection_state,
     }
 

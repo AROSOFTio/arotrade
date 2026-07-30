@@ -10,6 +10,7 @@ from app import models, schemas
 from app.database import get_db
 from app.services import trading_control
 from app.services.mt5_bridge.store import get_account_snapshot, get_quote
+from app.services.mt5_bridge.store import get_candles
 from app.services.order_execution import (
     ExecutionError,
     execute_manual_order,
@@ -23,12 +24,33 @@ def _enum_value(value) -> str:
 def _direct_quote(account_id: int, symbol: str) -> dict:
     quote = get_quote(account_id, symbol)
     if not quote:
-        raise ExecutionError("Direct MT5 bridge has no fresh quote for this symbol. Keep the EA connected on that chart.")
+        quote = _latest_candle_quote(account_id, symbol)
+    if not quote:
+        raise ExecutionError("Direct MT5 bridge has no fresh quote or candle for this symbol. Keep the EA connected on that chart.")
     bid = float(quote.get("bid") or 0)
     ask = float(quote.get("ask") or 0)
     if bid <= 0 or ask <= 0:
         raise ExecutionError("Direct MT5 bridge quote is missing bid/ask prices.")
     return quote
+
+
+def _latest_candle_quote(account_id: int, symbol: str) -> dict | None:
+    for timeframe in ("M1", "M5", "M15", "M30", "H1"):
+        candles = get_candles(account_id, symbol, timeframe, 1)
+        if not candles:
+            continue
+        close = float(candles[-1].get("close") or 0)
+        if close <= 0:
+            continue
+        return {
+            "symbol": symbol.upper(),
+            "bid": close,
+            "ask": close,
+            "spread": 0.0,
+            "time": candles[-1].get("time") or candles[-1].get("brokerTime") or "",
+            "fallback_quote": True,
+        }
+    return None
 def _direct_observed_price(direction: str, quote: dict) -> float:
     return float(quote.get("ask") if direction == "buy" else quote.get("bid"))
 def _assert_direct_execution_allowed(db: Session, user: models.User, account: models.BrokerAccount, volume: float) -> str:
@@ -173,7 +195,7 @@ def _preview_direct_mt5_order(db: Session, user_id: int, body: schemas.ManualOrd
         account_currency=str(snapshot.get("currency") or account.currency or "USD"),
         quote_time=quote.get("time"),
         quote_age_seconds=None,
-        stale_data_warning=False,
+        stale_data_warning=bool(quote.get("fallback_quote")),
         risk_warnings=[],
     )
 @router.post("/preview", response_model=schemas.ManualOrderPreviewResponse)
