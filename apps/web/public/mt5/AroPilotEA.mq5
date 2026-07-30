@@ -13,6 +13,7 @@ input string ApiKey = "";
 input long AccountId = 0;
 input int SendIntervalSeconds = 10;
 input int CandleBars = 240;
+input int MaxSymbolsToStream = 8;
 input bool EnableAutoTrading = false;
 input double MaxLotsPerTrade = 0.10;
 input int MaxOpenTrades = 1;
@@ -67,7 +68,7 @@ void PollCommands()
    ulong dealTicket = 0;
    int retcode = 0;
    string message = "";
-   bool executed = ExecuteCommandFromJson(response, EnableAutoTrading, MaxLotsPerTrade, MaxOpenTrades, MaxDailyLossPercent, orderTicket, dealTicket, retcode, message);
+   bool executed = ExecuteCommandFromJson(response, EnableAutoTrading, MaxLotsPerTrade, MaxOpenTrades, MaxDailyLossPercent, positionTicket, orderTicket, dealTicket, retcode, message);
    if(commandId != "")
    {
       string ack = "{"
@@ -88,9 +89,34 @@ void SendSnapshot()
 {
    g_lastSend = TimeCurrent();
    bool heartbeat = BridgePost(BridgeUrl, ApiKey, "/heartbeat", BuildHeartbeatJson(AccountId));
-   bool quote = BridgePost(BridgeUrl, ApiKey, "/quote", BuildQuoteJson(AccountId));
-   string candles = BuildCandlesJson(AccountId, CandleBars);
-   bool candleOk = candles != "" && BridgePost(BridgeUrl, ApiKey, "/candles", candles);
+   bool quote = false;
+   bool candleOk = false;
+   int totalSymbols = SymbolsTotal(true);
+   int streamLimit = MaxSymbolsToStream;
+   if(streamLimit < 1) streamLimit = 1;
+   int sent = 0;
+   for(int i = 0; i < totalSymbols && sent < streamLimit; i++)
+   {
+      string streamSymbol = SymbolName(i, true);
+      if(streamSymbol == "") continue;
+      string quotePayload = BuildQuoteJson(AccountId, streamSymbol);
+      if(quotePayload != "" && BridgePost(BridgeUrl, ApiKey, "/quote", quotePayload))
+         quote = true;
+      string candlePayload = BuildCandlesJson(AccountId, CandleBars, streamSymbol);
+      if(candlePayload != "" && BridgePost(BridgeUrl, ApiKey, "/candles", candlePayload))
+         candleOk = true;
+      sent++;
+   }
+   if(!quote)
+   {
+      string quotePayload = BuildQuoteJson(AccountId, _Symbol);
+      quote = quotePayload != "" && BridgePost(BridgeUrl, ApiKey, "/quote", quotePayload);
+   }
+   if(!candleOk)
+   {
+      string candlePayload = BuildCandlesJson(AccountId, CandleBars, _Symbol);
+      candleOk = candlePayload != "" && BridgePost(BridgeUrl, ApiKey, "/candles", candlePayload);
+   }
    g_connected = heartbeat && quote && candleOk;
    if(g_connected)
    {

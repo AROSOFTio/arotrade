@@ -13,15 +13,17 @@ string BuildPositionsJson()
    {
       ulong ticket = PositionGetTicket(i);
       if(ticket == 0 || !PositionSelectByTicket(ticket)) continue;
+      string posSymbol = PositionGetString(POSITION_SYMBOL);
+      int digits = (int)SymbolInfoInteger(posSymbol, SYMBOL_DIGITS);
       if(StringLen(json) > 1) json += ",";
       json += "{"
          + "\"ticket\":" + IntegerToString((long)ticket) + ","
-         + "\"symbol\":\"" + JsonEscape(PositionGetString(POSITION_SYMBOL)) + "\","
+         + "\"symbol\":\"" + JsonEscape(posSymbol) + "\","
          + "\"type\":\"" + (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY ? "buy" : "sell") + "\","
          + "\"volume\":" + DoubleToString(PositionGetDouble(POSITION_VOLUME), 2) + ","
-         + "\"price_open\":" + DoubleToString(PositionGetDouble(POSITION_PRICE_OPEN), _Digits) + ","
-         + "\"stop_loss\":" + DoubleToString(PositionGetDouble(POSITION_SL), _Digits) + ","
-         + "\"take_profit\":" + DoubleToString(PositionGetDouble(POSITION_TP), _Digits) + ","
+         + "\"price_open\":" + DoubleToString(PositionGetDouble(POSITION_PRICE_OPEN), digits) + ","
+         + "\"stop_loss\":" + DoubleToString(PositionGetDouble(POSITION_SL), digits) + ","
+         + "\"take_profit\":" + DoubleToString(PositionGetDouble(POSITION_TP), digits) + ","
          + "\"profit\":" + DoubleToString(PositionGetDouble(POSITION_PROFIT), 2)
          + "}";
    }
@@ -71,6 +73,26 @@ string BuildHistoryJson(int maxDeals=20)
    return json + "]";
 }
 
+string BuildSymbolsJson(int maxSymbols=30)
+{
+   string json = "[";
+   int total = SymbolsTotal(true);
+   int added = 0;
+   for(int i = 0; i < total && added < maxSymbols; i++)
+   {
+      string symbol = SymbolName(i, true);
+      if(symbol == "") continue;
+      if(StringLen(json) > 1) json += ",";
+      json += "{"
+         + "\"symbol\":\"" + JsonEscape(symbol) + "\","
+         + "\"broker_symbol\":\"" + JsonEscape(symbol) + "\","
+         + "\"display_name\":\"" + JsonEscape(symbol) + "\""
+         + "}";
+      added++;
+   }
+   return json + "]";
+}
+
 string BuildHeartbeatJson(long accountId)
 {
    string accountType = AccountInfoInteger(ACCOUNT_TRADE_MODE) == ACCOUNT_TRADE_MODE_REAL ? "live" : "demo";
@@ -86,6 +108,7 @@ string BuildHeartbeatJson(long accountId)
       + "\"currency\":\"" + JsonEscape(AccountInfoString(ACCOUNT_CURRENCY)) + "\","
       + "\"symbol\":\"" + JsonEscape(_Symbol) + "\","
       + "\"timeframe\":\"" + TfToText(_Period) + "\","
+      + "\"symbols\":" + BuildSymbolsJson(30) + ","
       + "\"positions\":" + BuildPositionsJson() + ","
       + "\"orders\":" + BuildOrdersJson() + ","
       + "\"history\":" + BuildHistoryJson(20) + ","
@@ -93,39 +116,43 @@ string BuildHeartbeatJson(long accountId)
       + "}";
 }
 
-string BuildQuoteJson(long accountId)
+string BuildQuoteJson(long accountId, string symbol="")
 {
+   string quoteSymbol = symbol == "" ? _Symbol : symbol;
    MqlTick tick;
-   SymbolInfoTick(_Symbol, tick);
-   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   if(!SymbolInfoTick(quoteSymbol, tick)) return "";
+   int digits = (int)SymbolInfoInteger(quoteSymbol, SYMBOL_DIGITS);
+   double point = SymbolInfoDouble(quoteSymbol, SYMBOL_POINT);
    double spread = point > 0 ? (tick.ask - tick.bid) / point : 0;
    return "{"
       + "\"account_id\":" + IntegerToString(accountId) + ","
-      + "\"symbol\":\"" + JsonEscape(_Symbol) + "\","
+      + "\"symbol\":\"" + JsonEscape(quoteSymbol) + "\","
       + "\"timeframe\":\"" + TfToText(_Period) + "\","
-      + "\"bid\":" + DoubleToString(tick.bid, _Digits) + ","
-      + "\"ask\":" + DoubleToString(tick.ask, _Digits) + ","
-      + "\"last\":" + DoubleToString(tick.last, _Digits) + ","
+      + "\"bid\":" + DoubleToString(tick.bid, digits) + ","
+      + "\"ask\":" + DoubleToString(tick.ask, digits) + ","
+      + "\"last\":" + DoubleToString(tick.last, digits) + ","
       + "\"volume\":" + DoubleToString(tick.volume_real, 2) + ","
       + "\"spread\":" + DoubleToString(spread, 1) + ","
       + "\"time\":\"" + TimeToIso((datetime)tick.time) + "\""
       + "}";
 }
 
-string BuildCandlesJson(long accountId, int bars)
+string BuildCandlesJson(long accountId, int bars, string symbol="")
 {
+   string candleSymbol = symbol == "" ? _Symbol : symbol;
    MqlRates rates[];
-   int copied = CopyRates(_Symbol, _Period, 0, bars, rates);
+   int copied = CopyRates(candleSymbol, _Period, 0, bars, rates);
    if(copied <= 0) return "";
    ArraySetAsSeries(rates, false);
-   string json = "{\"account_id\":" + IntegerToString(accountId) + ",\"symbol\":\"" + JsonEscape(_Symbol) + "\",\"timeframe\":\"" + TfToText(_Period) + "\",\"candles\":[";
+   int digits = (int)SymbolInfoInteger(candleSymbol, SYMBOL_DIGITS);
+   string json = "{\"account_id\":" + IntegerToString(accountId) + ",\"symbol\":\"" + JsonEscape(candleSymbol) + "\",\"timeframe\":\"" + TfToText(_Period) + "\",\"candles\":[";
    for(int i = 0; i < copied; i++)
    {
       if(i > 0) json += ",";
-      json += "{\"time\":\"" + TimeToIso(rates[i].time) + "\",\"open\":" + DoubleToString(rates[i].open, _Digits)
-         + ",\"high\":" + DoubleToString(rates[i].high, _Digits)
-         + ",\"low\":" + DoubleToString(rates[i].low, _Digits)
-         + ",\"close\":" + DoubleToString(rates[i].close, _Digits)
+      json += "{\"time\":\"" + TimeToIso(rates[i].time) + "\",\"open\":" + DoubleToString(rates[i].open, digits)
+         + ",\"high\":" + DoubleToString(rates[i].high, digits)
+         + ",\"low\":" + DoubleToString(rates[i].low, digits)
+         + ",\"close\":" + DoubleToString(rates[i].close, digits)
          + ",\"volume\":" + IntegerToString((int)rates[i].tick_volume) + "}";
    }
    json += "]}";

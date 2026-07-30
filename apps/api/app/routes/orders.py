@@ -174,7 +174,7 @@ def _preview_direct_mt5_order(db: Session, user_id: int, body: schemas.ManualOrd
         quote_time=quote.get("time"),
         quote_age_seconds=None,
         stale_data_warning=False,
-        risk_warnings=[] if body.take_profit else ["Take profit is optional, but recommended for direct MT5 execution."],
+        risk_warnings=[],
     )
 @router.post("/preview", response_model=schemas.ManualOrderPreviewResponse)
 async def preview_order(

@@ -450,7 +450,7 @@ class ExecutionAudit(Base):
     trade_id = Column(Integer, ForeignKey("trades.id"), nullable=True)
 
     broker = Column(String(50), nullable=False)
-    mode = Column(String(10), nullable=False)
+    mode = Column(String(30), nullable=False)
     outcome = Column(String(30), nullable=False)
     reason = Column(Text, nullable=True)
     details = Column(JSON, nullable=True)

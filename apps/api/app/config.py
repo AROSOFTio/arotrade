@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     # gemini, openrouter, openai, claude, deepseek, qwen, grok.
     AI_PROVIDER_ORDER: str = "ollama,lmstudio,gemini,openrouter,openai,claude,deepseek,qwen,grok"
     OLLAMA_BASE_URL: str = ""
-    OLLAMA_MODEL: str = "llama3.1"
+    OLLAMA_MODEL: str = "llama3.2:1b"
     LMSTUDIO_BASE_URL: str = ""
     LMSTUDIO_MODEL: str = "local-model"
     XAI_API_KEY: str = ""

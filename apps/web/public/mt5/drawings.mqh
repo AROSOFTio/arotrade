@@ -3,6 +3,76 @@
 
 #include "utils.mqh"
 
+double ChartPriceSpan()
+{
+   double minPrice = 0.0;
+   double maxPrice = 0.0;
+   if(ChartGetDouble(0, CHART_PRICE_MIN, 0, minPrice) && ChartGetDouble(0, CHART_PRICE_MAX, 0, maxPrice) && maxPrice > minPrice)
+      return maxPrice - minPrice;
+   double high = iHigh(_Symbol, _Period, 0);
+   double low = iLow(_Symbol, _Period, 0);
+   for(int i = 1; i < MathMin(Bars(_Symbol, _Period), 80); i++)
+   {
+      high = MathMax(high, iHigh(_Symbol, _Period, i));
+      low = MathMin(low, iLow(_Symbol, _Period, i));
+   }
+   return MathMax(high - low, _Point * 100.0);
+}
+
+datetime ChartTextAnchorTime(int shift=8)
+{
+   int bars = Bars(_Symbol, _Period);
+   if(bars <= 0) return TimeCurrent();
+   return iTime(_Symbol, _Period, MathMin(MathMax(0, shift), bars - 1));
+}
+
+string CleanJsonText(string value)
+{
+   string text = value;
+   StringReplace(text, "\\r", "");
+   StringReplace(text, "\\n", "\n");
+   StringReplace(text, "\\\"", "\"");
+   StringReplace(text, "\\\\", "\\");
+   return text;
+}
+
+string TextLineAt(string text, int lineIndex)
+{
+   int start = 0;
+   int line = 0;
+   for(int i = 0; i <= StringLen(text); i++)
+   {
+      bool endOfText = i >= StringLen(text);
+      ushort ch = endOfText ? 0 : StringGetCharacter(text, i);
+      if(endOfText || ch == 10)
+      {
+         if(line == lineIndex) return StringSubstr(text, start, i - start);
+         start = i + 1;
+         line++;
+      }
+   }
+   return "";
+}
+
+void DrawInlineText(string name, string label, double price, color textColor, int row=0, int shift=8)
+{
+   if(label == "") return;
+   if(price <= 0) price = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double lineStep = MathMax(ChartPriceSpan() / 45.0, _Point * 10.0);
+   double y = price - (row * lineStep);
+   datetime when = ChartTextAnchorTime(shift);
+   string obj = "AroPilot_" + name;
+   if(ObjectFind(0, obj) < 0)
+      ObjectCreate(0, obj, OBJ_TEXT, 0, when, y);
+   ObjectSetInteger(0, obj, OBJPROP_TIME, 0, when);
+   ObjectSetDouble(0, obj, OBJPROP_PRICE, 0, y);
+   ObjectSetInteger(0, obj, OBJPROP_COLOR, textColor);
+   ObjectSetInteger(0, obj, OBJPROP_FONTSIZE, 9);
+   ObjectSetString(0, obj, OBJPROP_FONT, "Arial Bold");
+   ObjectSetString(0, obj, OBJPROP_TEXT, label);
+   ObjectSetInteger(0, obj, OBJPROP_BACK, false);
+}
+
 void DrawHorizontalLevel(string name, double price, color lineColor, string label="")
 {
    if(price <= 0) return;
@@ -12,23 +82,24 @@ void DrawHorizontalLevel(string name, double price, color lineColor, string labe
    ObjectSetDouble(0, obj, OBJPROP_PRICE, price);
    ObjectSetInteger(0, obj, OBJPROP_COLOR, lineColor);
    ObjectSetInteger(0, obj, OBJPROP_STYLE, STYLE_DASH);
-   ObjectSetInteger(0, obj, OBJPROP_WIDTH, 1);
+   ObjectSetInteger(0, obj, OBJPROP_WIDTH, 2);
    if(label != "") ObjectSetString(0, obj, OBJPROP_TEXT, label);
+   if(label != "")
+      DrawInlineText(name + "_tag", label + " @ " + DoubleToString(price, _Digits), price, lineColor, 0, 10);
 }
 
 void DrawTextPanel(string name, string label)
 {
    if(label == "") return;
-   string obj = "AroPilot_" + name;
-   if(ObjectFind(0, obj) < 0)
-      ObjectCreate(0, obj, OBJ_LABEL, 0, 0, 0);
-   ObjectSetInteger(0, obj, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, obj, OBJPROP_XDISTANCE, 12);
-   ObjectSetInteger(0, obj, OBJPROP_YDISTANCE, 28);
-   ObjectSetInteger(0, obj, OBJPROP_COLOR, clrBlack);
-   ObjectSetInteger(0, obj, OBJPROP_FONTSIZE, 9);
-   ObjectSetString(0, obj, OBJPROP_FONT, "Arial");
-   ObjectSetString(0, obj, OBJPROP_TEXT, label);
+   string text = CleanJsonText(label);
+   double anchorPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   if(anchorPrice <= 0) anchorPrice = iClose(_Symbol, _Period, 0);
+   for(int i = 0; i < 6; i++)
+   {
+      string line = TextLineAt(text, i);
+      if(line == "") break;
+      DrawInlineText(name + "_" + IntegerToString(i), line, anchorPrice, clrBlack, i, 14);
+   }
 }
 
 void DrawArrow(string name, datetime when, double price, bool buy)
@@ -103,6 +174,7 @@ string SafeDrawingName(string fallback, string id)
 double FirstPrice(string objectJson)
 {
    double price = JsonNumberValue(objectJson, "target_price", 0.0);
+   if(price <= 0) price = JsonNumberValue(objectJson, "price", 0.0);
    if(price <= 0) price = JsonNumberValue(objectJson, "price_start", 0.0);
    if(price <= 0) price = JsonNumberValue(objectJson, "entry_low", 0.0);
    if(price <= 0) price = JsonNumberValue(objectJson, "entry_high", 0.0);
@@ -162,9 +234,10 @@ void DrawChartObjectJson(string objectJson, int index)
       return;
    }
 
-   if(type == "signal_marker" || type == "swing_high" || type == "swing_low")
+   if(type == "arrow" || type == "signal_marker" || type == "swing_high" || type == "swing_low")
    {
-      bool buy = type == "swing_low" || JsonStringValue(objectJson, "state", "") == "buy";
+      string direction = JsonStringValue(objectJson, "direction", JsonStringValue(objectJson, "state", ""));
+      bool buy = type == "swing_low" || direction == "buy" || direction == "BUY";
       DrawArrow(id, TimeCurrent(), FirstPrice(objectJson), buy);
    }
 }
@@ -222,6 +295,14 @@ void DrawAnalysisFromJson(string json)
    DrawHorizontalLevel("take_profit_3", tp3, clrDarkGreen, "AroPilot take profit 3");
    if(entryMin > 0 && entryMax > 0) DrawZone("entry_zone", entryMax, entryMin, clrAliceBlue);
    if(signal == "buy" || signal == "sell") DrawArrow(signal + "_signal", TimeCurrent(), entryMin > 0 ? entryMin : entryMax, signal == "buy");
+   if(signal == "buy" || signal == "sell")
+   {
+      string upperSignal = signal;
+      StringToUpper(upperSignal);
+      DrawTextPanel("mentor_plan", "AroPilot AI: " + upperSignal + "\\nEntry: " + DoubleToString(entryMin, _Digits) + " - " + DoubleToString(entryMax, _Digits) + "\\nSL: " + DoubleToString(stopLoss, _Digits) + " TP1: " + DoubleToString(tp1, _Digits));
+   }
+   else
+      DrawTextPanel("mentor_plan", "AroPilot AI: WAIT\\nNo clean entry yet. Watch support/resistance reaction.");
    DrawChartObjectsFromJson(json);
 }
 

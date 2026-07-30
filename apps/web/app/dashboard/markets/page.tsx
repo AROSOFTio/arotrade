@@ -614,6 +614,14 @@ export default function MarketsPage() {
       setShowConfirmModal(false)
       void loadPositions()
       void loadAccountState()
+      window.setTimeout(() => {
+        void loadPositions()
+        void loadAccountState()
+      }, 4000)
+      window.setTimeout(() => {
+        void loadPositions()
+        void loadAccountState()
+      }, 10000)
     } catch (e) {
       setError(errorMessage(e))
       setShowConfirmModal(false)

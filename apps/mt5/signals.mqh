@@ -15,7 +15,28 @@ struct AroPilotSignal
    string notes;
 };
 
-bool ExecuteCommandFromJson(string json, bool autoTradingEnabled, double maxLots, int maxOpenTrades, double maxDailyLossPercent, ulong &orderTicket, ulong &dealTicket, int &retcode, string &message)
+ulong FindLatestAroPilotPosition(string symbol)
+{
+   ulong bestTicket = 0;
+   datetime bestTime = 0;
+   int total = PositionsTotal();
+   for(int i = 0; i < total; i++)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0 || !PositionSelectByTicket(ticket)) continue;
+      if(PositionGetString(POSITION_SYMBOL) != symbol) continue;
+      if((long)PositionGetInteger(POSITION_MAGIC) != 20260730) continue;
+      datetime opened = (datetime)PositionGetInteger(POSITION_TIME);
+      if(bestTicket == 0 || opened >= bestTime)
+      {
+         bestTicket = ticket;
+         bestTime = opened;
+      }
+   }
+   return bestTicket;
+}
+
+bool ExecuteCommandFromJson(string json, bool autoTradingEnabled, double maxLots, int maxOpenTrades, double maxDailyLossPercent, ulong &positionTicket, ulong &orderTicket, ulong &dealTicket, int &retcode, string &message)
 {
    orderTicket = 0;
    dealTicket = 0;
@@ -31,7 +52,7 @@ bool ExecuteCommandFromJson(string json, bool autoTradingEnabled, double maxLots
    double volume = JsonNumberValue(json, "volume", 0.0);
    double stopLoss = JsonNumberValue(json, "stop_loss", 0.0);
    double takeProfit = JsonNumberValue(json, "take_profit", 0.0);
-   ulong positionTicket = (ulong)JsonNumberValue(json, "position_ticket", 0.0);
+   positionTicket = (ulong)JsonNumberValue(json, "position_ticket", 0.0);
    string symbol = JsonStringValue(json, "symbol", _Symbol);
 
    CTrade trade;
@@ -45,6 +66,7 @@ bool ExecuteCommandFromJson(string json, bool autoTradingEnabled, double maxLots
       if(!LocalRiskAllows(volume, maxLots, maxOpenTrades, maxDailyLossPercent)) { message = "Local EA risk gate blocked command"; return false; }
       if(direction == "buy") ok = trade.Buy(volume, symbol, 0.0, stopLoss, takeProfit, "AroPilot AI");
       if(direction == "sell") ok = trade.Sell(volume, symbol, 0.0, stopLoss, takeProfit, "AroPilot AI");
+      if(ok) positionTicket = FindLatestAroPilotPosition(symbol);
    }
    else if(action == "modify_position")
    {
