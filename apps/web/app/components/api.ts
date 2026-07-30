@@ -17,6 +17,9 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   if (init.body && typeof init.body === 'string' && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
+  if (!headers.has('Accept')) {
+    headers.set('Accept', 'application/json')
+  }
   if (token) {
     headers.set('Authorization', `Bearer ${token}`)
   }
@@ -27,10 +30,16 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   })
 
   if (!response.ok) {
-    const payload = await response.json().catch(() => null)
+    const raw = await response.text().catch(() => '')
+    let payload: any = null
+    try {
+      payload = raw ? JSON.parse(raw) : null
+    } catch {
+      payload = null
+    }
     const detail = Array.isArray(payload?.detail)
       ? payload.detail.map((item: { msg?: string }) => item.msg || 'Invalid request').join(', ')
-      : payload?.detail || payload?.error || 'Request failed'
+      : payload?.detail || payload?.error || raw || `Request failed (${response.status})`
     throw new ApiError(detail, response.status)
   }
 

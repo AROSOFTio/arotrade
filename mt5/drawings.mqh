@@ -11,24 +11,31 @@ void DrawHorizontalLevel(string name, double price, color lineColor, string labe
       ObjectCreate(0, obj, OBJ_HLINE, 0, 0, price);
    ObjectSetDouble(0, obj, OBJPROP_PRICE, price);
    ObjectSetInteger(0, obj, OBJPROP_COLOR, lineColor);
-   ObjectSetInteger(0, obj, OBJPROP_STYLE, STYLE_DASH);
+   ObjectSetInteger(0, obj, OBJPROP_STYLE, STYLE_DOT);
    ObjectSetInteger(0, obj, OBJPROP_WIDTH, 1);
-   if(label != "") ObjectSetString(0, obj, OBJPROP_TEXT, label);
+   ObjectSetInteger(0, obj, OBJPROP_BACK, false);
+   ObjectSetInteger(0, obj, OBJPROP_SELECTABLE, true);
+   if(label != "")
+      ObjectSetString(0, obj, OBJPROP_TOOLTIP, label + "\nPrice: " + DoubleToString(price, _Digits));
+}
+
+void DeleteAroPilotTextObjects()
+{
+   for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
+   {
+      string obj = ObjectName(0, i, 0, -1);
+      if(StringFind(obj, "AroPilot_") != 0) continue;
+      if(obj == "AroPilot_Status") continue;
+      long type = ObjectGetInteger(0, obj, OBJPROP_TYPE);
+      if(type == OBJ_TEXT || type == OBJ_LABEL)
+         ObjectDelete(0, obj);
+   }
 }
 
 void DrawTextPanel(string name, string label)
 {
-   if(label == "") return;
-   string obj = "AroPilot_" + name;
-   if(ObjectFind(0, obj) < 0)
-      ObjectCreate(0, obj, OBJ_LABEL, 0, 0, 0);
-   ObjectSetInteger(0, obj, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, obj, OBJPROP_XDISTANCE, 12);
-   ObjectSetInteger(0, obj, OBJPROP_YDISTANCE, 28);
-   ObjectSetInteger(0, obj, OBJPROP_COLOR, clrBlack);
-   ObjectSetInteger(0, obj, OBJPROP_FONTSIZE, 9);
-   ObjectSetString(0, obj, OBJPROP_FONT, "Arial");
-   ObjectSetString(0, obj, OBJPROP_TEXT, label);
+   // No permanent text panels on top of candles. Keep chart space for clean
+   // TradingView-style lines, arrows, and zones only.
 }
 
 void DrawArrow(string name, datetime when, double price, bool buy)
@@ -79,8 +86,8 @@ void DrawTrendObject(string name, datetime t1, double p1, datetime t2, double p2
 
 color DrawingColor(string type)
 {
-   if(type == "support_zone" || type == "demand_zone" || type == "swing_low") return clrPaleGreen;
-   if(type == "resistance_zone" || type == "supply_zone" || type == "swing_high") return clrMistyRose;
+   if(type == "support_zone" || type == "demand_zone" || type == "swing_low") return clrLimeGreen;
+   if(type == "resistance_zone" || type == "supply_zone" || type == "swing_high") return clrTomato;
    if(type == "order_block") return clrLavender;
    if(type == "fair_value_gap") return clrLightYellow;
    if(type == "liquidity_zone") return clrLightCyan;
@@ -206,6 +213,7 @@ void DrawChartObjectsFromJson(string json)
 
 void DrawAnalysisFromJson(string json)
 {
+   DeleteAroPilotTextObjects();
    double entryMin = JsonNumberValue(json, "entry_min", 0.0);
    double entryMax = JsonNumberValue(json, "entry_max", 0.0);
    double stopLoss = JsonNumberValue(json, "stop_loss", 0.0);

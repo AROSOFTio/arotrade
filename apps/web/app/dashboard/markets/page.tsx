@@ -66,6 +66,12 @@ type ChartOverlay = {
   price: number
   color: string
 }
+type ChartLevelHover = {
+  x: number
+  y: number
+  label: string
+  color: string
+} | null
 type ManualOrderPreview = {
   broker_symbol: string
   direction: string
@@ -132,9 +138,10 @@ export default function MarketsPage() {
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
   const analysisLinesRef = useRef<any[]>([])
+  const chartLevelsRef = useRef<ChartOverlay[]>([])
   const [srSummary, setSrSummary] = useState('')
   const [srFindings, setSrFindings] = useState<ExpertFinding[]>([])
-  const [chartOverlays, setChartOverlays] = useState<ChartOverlay[]>([])
+  const [chartLevelHover, setChartLevelHover] = useState<ChartLevelHover>(null)
   const [analysisLoading, setAnalysisLoading] = useState(false)
 
   // Manual Trade Ticket State
@@ -281,6 +288,8 @@ export default function MarketsPage() {
     const series = seriesRef.current
     if (!series) {
       analysisLinesRef.current = []
+      chartLevelsRef.current = []
+      setChartLevelHover(null)
       return
     }
     for (const line of analysisLinesRef.current) {
@@ -291,7 +300,8 @@ export default function MarketsPage() {
       }
     }
     analysisLinesRef.current = []
-    setChartOverlays([])
+    chartLevelsRef.current = []
+    setChartLevelHover(null)
   }, [])
 
   const renderAnalysisLevels = useCallback((drawings: ChartDrawing[]) => {
@@ -302,7 +312,7 @@ export default function MarketsPage() {
       .filter((drawing) => drawing.enabled && drawing.metadata?.expert === 'support_resistance')
       .slice(0, 24)
     const lines: any[] = []
-    const overlays: ChartOverlay[] = []
+    const chartLevels: ChartOverlay[] = []
     for (const drawing of lineDrawings) {
       const price =
         drawing.price_start ??
@@ -317,13 +327,13 @@ export default function MarketsPage() {
       lines.push(series.createPriceLine({
         price,
         color: drawing.style?.line_color || '#16a34a',
-        lineWidth: Math.max(1, Math.min(4, drawing.style?.line_width || 1)) as any,
+        lineWidth: Math.max(1, Math.min(2, drawing.style?.line_width || 1)) as any,
         lineStyle,
         axisLabelVisible: true,
-        title: drawing.label,
+        title: '',
       }))
-      if (overlays.length < 10) {
-        overlays.push({
+      if (chartLevels.length < 24) {
+        chartLevels.push({
           key: `${drawing.id ?? drawing.label}-${price}`,
           label: `${drawing.label} ${formatNumber(price, 2)}`,
           price,
@@ -332,7 +342,8 @@ export default function MarketsPage() {
       }
     }
     analysisLinesRef.current = lines
-    setChartOverlays(overlays)
+    chartLevelsRef.current = chartLevels
+    setChartLevelHover(null)
   }, [clearAnalysisLines])
 
   useEffect(() => {
@@ -379,18 +390,50 @@ export default function MarketsPage() {
     seriesRef.current = series
     setChartReady(true)
 
+    const onCrosshairMove = (param: any) => {
+      const point = param?.point
+      const currentSeries = seriesRef.current
+      if (!point || !currentSeries || !Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+        setChartLevelHover(null)
+        return
+      }
+      let nearest: { level: ChartOverlay; distance: number; y: number } | null = null
+      for (const level of chartLevelsRef.current) {
+        const y = currentSeries.priceToCoordinate(level.price)
+        if (y == null || !Number.isFinite(y)) continue
+        const distance = Math.abs(y - point.y)
+        if (distance <= 10 && (!nearest || distance < nearest.distance)) {
+          nearest = { level, distance, y }
+        }
+      }
+      if (!nearest) {
+        setChartLevelHover(null)
+        return
+      }
+      setChartLevelHover({
+        x: Math.max(10, Math.min(point.x + 14, container.clientWidth - 220)),
+        y: Math.max(10, Math.min(nearest.y - 18, chartHeight() - 46)),
+        label: nearest.level.label,
+        color: nearest.level.color,
+      })
+    }
+
     const onResize = () => chart.applyOptions({ width: container.clientWidth, height: chartHeight() })
     const onTheme = () => chart.applyOptions(themeOptions(isDark()))
+    chart.subscribeCrosshairMove(onCrosshairMove)
     onResize()
     window.addEventListener('resize', onResize)
     window.addEventListener('themechange', onTheme)
     return () => {
+      chart.unsubscribeCrosshairMove(onCrosshairMove)
       window.removeEventListener('resize', onResize)
       window.removeEventListener('themechange', onTheme)
       chart.remove()
       chartRef.current = null
       seriesRef.current = null
       analysisLinesRef.current = []
+      chartLevelsRef.current = []
+      setChartLevelHover(null)
       setChartReady(false)
     }
   }, [accountsLoading])
@@ -813,23 +856,18 @@ export default function MarketsPage() {
                 {chartMessage}
               </div>
             )}
-            {chartOverlays.map((overlay, index) => {
-              const coordinate = seriesRef.current?.priceToCoordinate(overlay.price)
-              if (coordinate == null || !Number.isFinite(coordinate)) return null
-              const top = Math.max(14, Math.min(coordinate - 12, 390))
-              return (
-                <div
-                  key={overlay.key}
-                  className="pointer-events-none absolute left-[54%] z-10 max-w-[260px] -translate-x-1/2 rounded px-2 py-1 text-[11px] font-black uppercase tracking-tight text-white shadow-lg ring-1 ring-white/70"
-                  style={{
-                    top: `${top + (index % 2) * 4}px`,
-                    backgroundColor: overlay.color,
-                  }}
-                >
-                  {overlay.label}
-                </div>
-              )
-            })}
+            {chartLevelHover && (
+              <div
+                className="pointer-events-none absolute z-10 max-w-[220px] rounded-md border border-white/70 px-2.5 py-1.5 text-[11px] font-semibold text-white shadow-lg"
+                style={{
+                  left: `${chartLevelHover.x}px`,
+                  top: `${chartLevelHover.y}px`,
+                  backgroundColor: chartLevelHover.color,
+                }}
+              >
+                {chartLevelHover.label}
+              </div>
+            )}
           </div>
           <p className="border-t border-slate-100 px-5 py-2.5 text-xs text-slate-400">
             Source: Xness MT5 EA live candles - no TradingView data - candles update every 30s - quotes every 10s - support/resistance auto-drawn

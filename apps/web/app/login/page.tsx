@@ -24,7 +24,10 @@ export default function LoginPage() {
     setError('')
     setLoading(true)
     try {
-      const response = await apiRequest<TokenResponse>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) })
+      const response = await apiRequest<TokenResponse>('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email: email.trim(), password }),
+      })
       window.localStorage.setItem('access_token', response.access_token)
       window.localStorage.setItem('refresh_token', response.refresh_token)
       router.replace('/dashboard')

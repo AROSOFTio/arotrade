@@ -56,21 +56,21 @@ string TextLineAt(string text, int lineIndex)
 
 void DrawInlineText(string name, string label, double price, color textColor, int row=0, int shift=8)
 {
-   if(label == "") return;
-   if(price <= 0) price = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   double lineStep = MathMax(ChartPriceSpan() / 45.0, _Point * 10.0);
-   double y = price - (row * lineStep);
-   datetime when = ChartTextAnchorTime(shift);
-   string obj = "AroPilot_" + name;
-   if(ObjectFind(0, obj) < 0)
-      ObjectCreate(0, obj, OBJ_TEXT, 0, when, y);
-   ObjectSetInteger(0, obj, OBJPROP_TIME, 0, when);
-   ObjectSetDouble(0, obj, OBJPROP_PRICE, 0, y);
-   ObjectSetInteger(0, obj, OBJPROP_COLOR, textColor);
-   ObjectSetInteger(0, obj, OBJPROP_FONTSIZE, 9);
-   ObjectSetString(0, obj, OBJPROP_FONT, "Arial Bold");
-   ObjectSetString(0, obj, OBJPROP_TEXT, label);
-   ObjectSetInteger(0, obj, OBJPROP_BACK, false);
+   // Legacy helper intentionally left blank. AroPilot now keeps chart text
+   // hover-only via OBJPROP_TOOLTIP so candle space stays clean.
+}
+
+void DeleteAroPilotTextObjects()
+{
+   for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
+   {
+      string obj = ObjectName(0, i, 0, -1);
+      if(StringFind(obj, "AroPilot_") != 0) continue;
+      if(obj == "AroPilot_Status") continue;
+      long type = ObjectGetInteger(0, obj, OBJPROP_TYPE);
+      if(type == OBJ_TEXT || type == OBJ_LABEL)
+         ObjectDelete(0, obj);
+   }
 }
 
 void DrawHorizontalLevel(string name, double price, color lineColor, string label="")
@@ -81,25 +81,21 @@ void DrawHorizontalLevel(string name, double price, color lineColor, string labe
       ObjectCreate(0, obj, OBJ_HLINE, 0, 0, price);
    ObjectSetDouble(0, obj, OBJPROP_PRICE, price);
    ObjectSetInteger(0, obj, OBJPROP_COLOR, lineColor);
-   ObjectSetInteger(0, obj, OBJPROP_STYLE, STYLE_DASH);
-   ObjectSetInteger(0, obj, OBJPROP_WIDTH, 2);
-   if(label != "") ObjectSetString(0, obj, OBJPROP_TEXT, label);
+   ObjectSetInteger(0, obj, OBJPROP_STYLE, STYLE_DOT);
+   ObjectSetInteger(0, obj, OBJPROP_WIDTH, 1);
+   ObjectSetInteger(0, obj, OBJPROP_BACK, false);
+   ObjectSetInteger(0, obj, OBJPROP_SELECTABLE, true);
    if(label != "")
-      DrawInlineText(name + "_tag", label + " @ " + DoubleToString(price, _Digits), price, lineColor, 0, 10);
+   {
+      string tooltip = label + "\nPrice: " + DoubleToString(price, _Digits);
+      ObjectSetString(0, obj, OBJPROP_TOOLTIP, tooltip);
+   }
 }
 
 void DrawTextPanel(string name, string label)
 {
-   if(label == "") return;
-   string text = CleanJsonText(label);
-   double anchorPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   if(anchorPrice <= 0) anchorPrice = iClose(_Symbol, _Period, 0);
-   for(int i = 0; i < 6; i++)
-   {
-      string line = TextLineAt(text, i);
-      if(line == "") break;
-      DrawInlineText(name + "_" + IntegerToString(i), line, anchorPrice, clrBlack, i, 14);
-   }
+   // No permanent text panels on top of candles. The web/MT5 chart should
+   // remain readable; level details are exposed through object tooltips.
 }
 
 void DrawArrow(string name, datetime when, double price, bool buy)
@@ -150,8 +146,8 @@ void DrawTrendObject(string name, datetime t1, double p1, datetime t2, double p2
 
 color DrawingColor(string type)
 {
-   if(type == "support_zone" || type == "demand_zone" || type == "swing_low") return clrPaleGreen;
-   if(type == "resistance_zone" || type == "supply_zone" || type == "swing_high") return clrMistyRose;
+   if(type == "support_zone" || type == "demand_zone" || type == "swing_low") return clrLimeGreen;
+   if(type == "resistance_zone" || type == "supply_zone" || type == "swing_high") return clrTomato;
    if(type == "order_block") return clrLavender;
    if(type == "fair_value_gap") return clrLightYellow;
    if(type == "liquidity_zone") return clrLightCyan;
@@ -279,6 +275,7 @@ void DrawChartObjectsFromJson(string json)
 
 void DrawAnalysisFromJson(string json)
 {
+   DeleteAroPilotTextObjects();
    double entryMin = JsonNumberValue(json, "entry_min", 0.0);
    double entryMax = JsonNumberValue(json, "entry_max", 0.0);
    double stopLoss = JsonNumberValue(json, "stop_loss", 0.0);
