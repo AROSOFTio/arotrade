@@ -51,10 +51,20 @@ type BrokerPosition = {
   type?: string
   side?: string
   volume?: number
+  status?: string
   openPrice?: number
+  price_open?: number
   currentPrice?: number
+  stop_loss?: number
+  take_profit?: number
   profit?: number
   unrealizedProfit?: number
+}
+type ChartOverlay = {
+  key: string
+  label: string
+  price: number
+  color: string
 }
 type ManualOrderPreview = {
   broker_symbol: string
@@ -124,6 +134,7 @@ export default function MarketsPage() {
   const analysisLinesRef = useRef<any[]>([])
   const [srSummary, setSrSummary] = useState('')
   const [srFindings, setSrFindings] = useState<ExpertFinding[]>([])
+  const [chartOverlays, setChartOverlays] = useState<ChartOverlay[]>([])
   const [analysisLoading, setAnalysisLoading] = useState(false)
 
   // Manual Trade Ticket State
@@ -144,6 +155,7 @@ export default function MarketsPage() {
   const [staleWarning, setStaleWarning] = useState(false)
   const [wsPrice, setWsPrice] = useState<{ bid: number; ask: number; spread: number } | null>(null)
   const [positions, setPositions] = useState<BrokerPosition[]>([])
+  const [pendingPositions, setPendingPositions] = useState<BrokerPosition[]>([])
   const [positionsLoading, setPositionsLoading] = useState(false)
   const [positionsError, setPositionsError] = useState('')
 
@@ -279,6 +291,7 @@ export default function MarketsPage() {
       }
     }
     analysisLinesRef.current = []
+    setChartOverlays([])
   }, [])
 
   const renderAnalysisLevels = useCallback((drawings: ChartDrawing[]) => {
@@ -289,6 +302,7 @@ export default function MarketsPage() {
       .filter((drawing) => drawing.enabled && drawing.metadata?.expert === 'support_resistance')
       .slice(0, 24)
     const lines: any[] = []
+    const overlays: ChartOverlay[] = []
     for (const drawing of lineDrawings) {
       const price =
         drawing.price_start ??
@@ -308,8 +322,17 @@ export default function MarketsPage() {
         axisLabelVisible: true,
         title: drawing.label,
       }))
+      if (overlays.length < 10) {
+        overlays.push({
+          key: `${drawing.id ?? drawing.label}-${price}`,
+          label: `${drawing.label} ${formatNumber(price, 2)}`,
+          price,
+          color: drawing.style?.line_color || '#16a34a',
+        })
+      }
     }
     analysisLinesRef.current = lines
+    setChartOverlays(overlays)
   }, [clearAnalysisLines])
 
   useEffect(() => {
@@ -525,7 +548,18 @@ export default function MarketsPage() {
     setPositionsError('')
     try {
       const response = await apiRequest<{ positions: BrokerPosition[] }>(`/market/accounts/${selectedAccountId}/positions`)
-      setPositions(Array.isArray(response.positions) ? response.positions : [])
+      const livePositions = Array.isArray(response.positions) ? response.positions : []
+      setPositions(livePositions)
+      if (livePositions.length > 0) {
+        setPendingPositions((pending) => pending.filter((item) => {
+          const itemSymbol = String(item.symbol ?? '').toUpperCase()
+          const itemSide = String(item.type ?? item.side ?? '').toLowerCase()
+          return !livePositions.some((live) =>
+            String(live.symbol ?? '').toUpperCase() === itemSymbol &&
+            String(live.type ?? live.side ?? '').toLowerCase() === itemSide
+          )
+        }))
+      }
     } catch (requestError) {
       setPositionsError(errorMessage(requestError))
     } finally {
@@ -610,7 +644,23 @@ export default function MarketsPage() {
         method: 'POST',
         body: JSON.stringify(body)
       })
-      setExecutionSuccess(`Order executed successfully! Position ID: ${res.broker_position_id || res.id}`)
+      setPendingPositions((current) => [
+        {
+          id: `pending-${res.client_order_id || res.id || Date.now()}`,
+          ticket: res.broker_position_id || res.client_order_id || res.id,
+          symbol: selectedSymbol.broker_symbol,
+          type: tradeDirection,
+          side: tradeDirection,
+          volume: Number(body.volume ?? previewData?.calculated_volume ?? 0),
+          price_open: previewData?.observed_price,
+          stop_loss: Number(body.stop_loss),
+          take_profit: body.take_profit != null ? Number(body.take_profit) : undefined,
+          profit: 0,
+          status: res.execution_status || 'sent_to_mt5',
+        },
+        ...current,
+      ].slice(0, 5))
+      setExecutionSuccess('Order sent to MT5 EA. Waiting for the next MT5 heartbeat to confirm the live position.')
       setPreviewData(null)
       setShowConfirmModal(false)
       void loadPositions()
@@ -638,6 +688,17 @@ export default function MarketsPage() {
   const displayedFreeMargin = previewData?.free_margin_after
   const previewRiskWarnings = previewData?.risk_warnings ?? []
   const previewHasBlockingRisk = previewRiskWarnings.length > 0
+  const visiblePositions = [
+    ...positions,
+    ...pendingPositions.filter((pending) => {
+      const pendingSymbol = String(pending.symbol ?? '').toUpperCase()
+      const pendingSide = String(pending.type ?? pending.side ?? '').toLowerCase()
+      return !positions.some((live) =>
+        String(live.symbol ?? '').toUpperCase() === pendingSymbol &&
+        String(live.type ?? live.side ?? '').toLowerCase() === pendingSide
+      )
+    }),
+  ]
 
   if (accountsLoading) {
     return (
@@ -752,6 +813,23 @@ export default function MarketsPage() {
                 {chartMessage}
               </div>
             )}
+            {chartOverlays.map((overlay, index) => {
+              const coordinate = seriesRef.current?.priceToCoordinate(overlay.price)
+              if (coordinate == null || !Number.isFinite(coordinate)) return null
+              const top = Math.max(14, Math.min(coordinate - 12, 390))
+              return (
+                <div
+                  key={overlay.key}
+                  className="pointer-events-none absolute left-[54%] z-10 max-w-[260px] -translate-x-1/2 rounded px-2 py-1 text-[11px] font-black uppercase tracking-tight text-white shadow-lg ring-1 ring-white/70"
+                  style={{
+                    top: `${top + (index % 2) * 4}px`,
+                    backgroundColor: overlay.color,
+                  }}
+                >
+                  {overlay.label}
+                </div>
+              )
+            })}
           </div>
           <p className="border-t border-slate-100 px-5 py-2.5 text-xs text-slate-400">
             Source: Xness MT5 EA live candles - no TradingView data - candles update every 30s - quotes every 10s - support/resistance auto-drawn
@@ -1078,8 +1156,8 @@ export default function MarketsPage() {
             {positionsError && (
               <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[11px] font-semibold text-red-700">{positionsError}</p>
             )}
-            {positions.length === 0 ? (
-              <p className="mt-3 text-xs leading-5 text-slate-500">No open MT5 positions for this account.</p>
+            {visiblePositions.length === 0 ? (
+              <p className="mt-3 text-xs leading-5 text-slate-500">No live MT5 positions have been reported by the EA heartbeat yet.</p>
             ) : (
               <div className="mt-3 max-h-72 overflow-auto rounded-md border border-slate-200">
                 <table className="w-full text-left text-[11px]">
@@ -1088,18 +1166,25 @@ export default function MarketsPage() {
                       <th className="px-3 py-2 font-semibold uppercase">Symbol</th>
                       <th className="px-3 py-2 font-semibold uppercase">Side</th>
                       <th className="px-3 py-2 font-semibold uppercase">Vol</th>
+                      <th className="px-3 py-2 font-semibold uppercase">State</th>
                       <th className="px-3 py-2 font-semibold uppercase">P/L</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {positions.map((position, index) => {
+                    {visiblePositions.map((position, index) => {
                       const profit = Number(position.profit ?? position.unrealizedProfit ?? 0)
                       const side = String(position.type ?? position.side ?? '-').replace('POSITION_TYPE_', '')
+                      const isPending = String(position.status ?? '').includes('mt5') || String(position.id ?? '').startsWith('pending-')
                       return (
                         <tr key={String(position.id ?? position.positionId ?? position.ticket ?? index)}>
                           <td className="px-3 py-2 font-semibold text-slate-900">{position.symbol ?? selectedSymbol?.broker_symbol ?? '-'}</td>
                           <td className="px-3 py-2 uppercase text-slate-600">{side}</td>
                           <td className="px-3 py-2 tabular-nums text-slate-700">{formatNumber(Number(position.volume ?? 0), 2)}</td>
+                          <td className="px-3 py-2">
+                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${isPending ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
+                              {isPending ? 'Waiting MT5' : 'Live MT5'}
+                            </span>
+                          </td>
                           <td className={`px-3 py-2 font-bold tabular-nums ${profit >= 0 ? 'text-[#15803d]' : 'text-[#b91c1c]'}`}>
                             {accountCurrency} {formatNumber(profit, 2)}
                           </td>
