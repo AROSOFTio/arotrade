@@ -245,17 +245,10 @@ export default function MarketsPage() {
   }, [])
 
   const loadAccountState = useCallback(async () => {
-    if (!selectedAccountId) return
-    const selected = accounts.find((account) => account.id === selectedAccountId)
-    if (!selected?.metaapi_account_id) return
-    try {
-      const updated = await apiRequest<BrokerAccount>(`/broker-accounts/${selectedAccountId}/state`)
-      setAccounts((current) => current.map((account) => account.id === updated.id ? updated : account))
-    } catch (err) {
-      // Keep the page running even if balance refresh fails.
-      setError(errorMessage(err))
-    }
-  }, [accounts, selectedAccountId])
+    // MetaApi state refresh is disabled. Direct MT5 account state is updated
+    // through the EA bridge snapshots instead of /broker-accounts/{id}/state.
+    return
+  }, [])
 
   const loadSymbols = useCallback(async () => {
     if (!selectedAccountId) return

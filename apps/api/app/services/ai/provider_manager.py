@@ -27,6 +27,19 @@ from .providers.openai_compatible import (
 TEXT_ONLY_CONFIDENCE_CAP = 50
 
 
+def _public_provider_error(provider: AIProvider, exc: Exception) -> str:
+    text = str(exc).lower()
+    if "401" in text or "unauthorized" in text:
+        return f"{provider.label} API key is invalid or unauthorized."
+    if "403" in text or "forbidden" in text:
+        return f"{provider.label} API access is forbidden for the configured key/model."
+    if "429" in text or "quota" in text or "rate limit" in text:
+        return f"{provider.label} quota or rate limit is exhausted."
+    if "not configured" in text or "missing" in text:
+        return f"{provider.label} is not configured."
+    return f"{provider.label} is currently unavailable."
+
+
 def _to_float(value, default: float = 0.0) -> float:
     try:
         return float(value)
@@ -181,7 +194,12 @@ class AIProviderManager:
                     "error": None,
                 })
             except AIProviderError as exc:
-                results.append({"provider": status.__dict__, "status": "Currently unavailable", "analysis": None, "error": str(exc)})
+                results.append({
+                    "provider": status.__dict__,
+                    "status": "Currently unavailable",
+                    "analysis": None,
+                    "error": _public_provider_error(provider, exc),
+                })
         available_items = [item for item in results if item.get("analysis")]
         available = [item["analysis"] for item in available_items]
         signal_counts = Counter(item["signal"] for item in available)

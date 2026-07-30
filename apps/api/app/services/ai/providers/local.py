@@ -23,22 +23,35 @@ class OllamaProvider(AIProvider):
             raise AIProviderError("Ollama is not configured")
         if any(isinstance(part, dict) and part.get("data") for part in parts):
             raise AIProviderError("Ollama adapter only supports text market snapshots")
+        prompt = "\n\n".join(str(part) for part in parts)
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {"temperature": 0.2},
+        }
+        if json_response:
+            payload["format"] = "json"
         try:
             response = httpx.post(
                 f"{self.settings.OLLAMA_BASE_URL.rstrip('/')}/api/generate",
-                json={
-                    "model": self.model,
-                    "prompt": "\n\n".join(str(part) for part in parts),
-                    "stream": False,
-                    "format": "json" if json_response else "",
-                    "options": {"temperature": 0.2},
-                },
+                json=payload,
                 timeout=60.0,
             )
+            if response.status_code >= 500 and json_response:
+                retry_payload = dict(payload)
+                retry_payload.pop("format", None)
+                retry = httpx.post(
+                    f"{self.settings.OLLAMA_BASE_URL.rstrip('/')}/api/generate",
+                    json=retry_payload,
+                    timeout=60.0,
+                )
+                retry.raise_for_status()
+                return str(retry.json().get("response") or "").strip()
             response.raise_for_status()
             return str(response.json().get("response") or "").strip()
         except Exception as exc:
-            raise AIProviderError(f"Ollama request failed: {exc}") from exc
+            raise AIProviderError("Ollama request failed. Check that the model is pulled and the Ollama container is healthy.") from exc
 
 
 class LMStudioProvider(AIProvider):
