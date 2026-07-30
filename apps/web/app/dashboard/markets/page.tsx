@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Activity, CalendarClock, Sparkles, TriangleAlert, Landmark, ShieldAlert, ArrowUpDown, Eye } from 'lucide-react'
-import { createChart, type IChartApi, type ISeriesApi, type UTCTimestamp } from 'lightweight-charts'
+import { LineStyle, createChart, type IChartApi, type ISeriesApi, type UTCTimestamp } from 'lightweight-charts'
 
 import { apiRequest, errorMessage, formatNumber } from '../../components/api'
 import { PageHeader } from '../../components/page-header'
+import type { ChartAnalysisResponse, ChartDrawing, ExpertFinding } from '../../components/trading-chart/chart-types'
 
 type BrokerAccount = {
   id: number
@@ -81,6 +82,8 @@ type ManualOrderPreview = {
 const timeframes = ['M5', 'M15', 'M30', 'H1', 'H4', 'D1']
 const NEWS_REFRESH_MS = 2 * 60_000
 const AI_REFRESH_MS = 5 * 60_000
+const isConnectedAccount = (account: BrokerAccount) =>
+  account.is_active && (account.connection_state === 'deployed' || account.connection_state === 'direct_connected' || account.broker === 'direct-mt5')
 const updateTime = (date: Date | null) => date ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'pending'
 const parsedMaxLiveRiskPercent = Number(process.env.NEXT_PUBLIC_MAX_LIVE_RISK_PERCENT || '0.25')
 const maxLiveRiskPercent = Number.isFinite(parsedMaxLiveRiskPercent) && parsedMaxLiveRiskPercent > 0 ? parsedMaxLiveRiskPercent : 0.25
@@ -117,6 +120,10 @@ export default function MarketsPage() {
   const chartContainerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
+  const analysisLinesRef = useRef<any[]>([])
+  const [srSummary, setSrSummary] = useState('')
+  const [srFindings, setSrFindings] = useState<ExpertFinding[]>([])
+  const [analysisLoading, setAnalysisLoading] = useState(false)
 
   // Manual Trade Ticket State
   const [tradeDirection, setTradeDirection] = useState<'buy' | 'sell'>('buy')
@@ -222,7 +229,7 @@ export default function MarketsPage() {
     setAccountsLoading(true)
     apiRequest<BrokerAccount[]>('/broker-accounts')
       .then((r) => {
-        const active = r.filter(a => a.is_active && a.connection_state === 'deployed')
+        const active = r.filter(isConnectedAccount)
         setAccounts(active)
         if (active.length > 0) {
           const saved = localStorage.getItem('arotrade:selected_account_id')
@@ -261,6 +268,53 @@ export default function MarketsPage() {
       setError(errorMessage(err))
     }
   }, [selectedAccountId])
+
+  const clearAnalysisLines = useCallback(() => {
+    const series = seriesRef.current
+    if (!series) {
+      analysisLinesRef.current = []
+      return
+    }
+    for (const line of analysisLinesRef.current) {
+      try {
+        series.removePriceLine(line)
+      } catch {
+        // Price line may already have been removed by chart teardown.
+      }
+    }
+    analysisLinesRef.current = []
+  }, [])
+
+  const renderAnalysisLevels = useCallback((drawings: ChartDrawing[]) => {
+    const series = seriesRef.current
+    if (!series) return
+    clearAnalysisLines()
+    const lineDrawings = drawings
+      .filter((drawing) => drawing.enabled && drawing.metadata?.expert === 'support_resistance')
+      .slice(0, 24)
+    const lines: any[] = []
+    for (const drawing of lineDrawings) {
+      const price =
+        drawing.price_start ??
+        drawing.price_end ??
+        drawing.price_high ??
+        drawing.price_low ??
+        drawing.entry_low ??
+        drawing.entry_high
+      if (typeof price !== 'number' || !Number.isFinite(price)) continue
+      const rawStyle = drawing.style?.line_style
+      const lineStyle = rawStyle === 'dotted' ? LineStyle.Dotted : rawStyle === 'dashed' ? LineStyle.Dashed : LineStyle.Solid
+      lines.push(series.createPriceLine({
+        price,
+        color: drawing.style?.line_color || '#16a34a',
+        lineWidth: Math.max(1, Math.min(4, drawing.style?.line_width || 1)) as any,
+        lineStyle,
+        axisLabelVisible: true,
+        title: drawing.label,
+      }))
+    }
+    analysisLinesRef.current = lines
+  }, [clearAnalysisLines])
 
   useEffect(() => {
     if (!selectedAccountId) return
@@ -316,6 +370,7 @@ export default function MarketsPage() {
       chart.remove()
       chartRef.current = null
       seriesRef.current = null
+      analysisLinesRef.current = []
       setChartReady(false)
     }
   }, [accountsLoading])
@@ -339,13 +394,33 @@ export default function MarketsPage() {
         .filter((c): c is { open: number; high: number; low: number; close: number; time: UTCTimestamp } => Boolean(c))
       seriesRef.current?.setData(chartData)
       chartRef.current?.timeScale().fitContent()
-      setChartMessage(chartData.length ? '' : 'No candle data returned for this symbol/timeframe.')
       setError('')
+      setSrSummary('')
+      setSrFindings([])
+      clearAnalysisLines()
+      if (chartData.length) {
+        setAnalysisLoading(true)
+        try {
+          const analysis = await apiRequest<ChartAnalysisResponse>(
+            `/market/accounts/${selectedAccountId}/symbols/${selectedSymbol.broker_symbol}/analysis?timeframe=${timeframe}&count=300&include=support_resistance&force_refresh=true`
+          )
+          renderAnalysisLevels(analysis.drawings)
+          const srExpert = analysis.experts.find((expert) => expert.id === 'support_resistance')
+          setSrSummary(srExpert?.summary || '')
+          setSrFindings(srExpert?.findings || [])
+        } catch (analysisError) {
+          setSrSummary(`Support/resistance analysis unavailable: ${errorMessage(analysisError)}`)
+          setSrFindings([])
+        } finally {
+          setAnalysisLoading(false)
+        }
+      }
+      setChartMessage(chartData.length ? '' : 'No candle data returned for this symbol/timeframe.')
     } catch (requestError) {
       setChartMessage('Could not load candles for this symbol/timeframe.')
       setError(errorMessage(requestError))
     }
-  }, [chartReady, selectedAccountId, selectedSymbol, timeframe])
+  }, [chartReady, clearAnalysisLines, renderAnalysisLevels, selectedAccountId, selectedSymbol, timeframe])
 
   const loadPrice = useCallback(() => {
     if (!selectedAccountId || !selectedSymbol) return
@@ -674,8 +749,38 @@ export default function MarketsPage() {
             )}
           </div>
           <p className="border-t border-slate-100 px-5 py-2.5 text-xs text-slate-400">
-            MT5 live feed · updates every 30s · quotes every 10s
+            MT5 live feed · updates every 30s · quotes every 10s · support/resistance auto-drawn
           </p>
+          <div className="border-t border-slate-100 px-5 py-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-900">Support & Resistance Expert</h2>
+                <p className="mt-1 text-xs text-slate-500">
+                  {analysisLoading ? 'Mapping daily/weekly/monthly levels, sessions, swings, pivots, and psychological prices...' : srSummary || 'Waiting for live candle data to draw levels.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void loadCandles()}
+                className="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Redraw levels
+              </button>
+            </div>
+            {srFindings.length > 0 && (
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {srFindings.slice(0, 4).map((finding) => (
+                  <div key={`${finding.kind}-${finding.price ?? finding.label}`} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-bold text-slate-800">{finding.label}</p>
+                      <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-bold text-slate-600">{finding.score}/100</span>
+                    </div>
+                    <p className="mt-1 text-xs tabular-nums text-slate-600">{typeof finding.price === 'number' ? formatNumber(finding.price, 5) : finding.importance}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="space-y-6">

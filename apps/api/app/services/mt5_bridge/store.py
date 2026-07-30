@@ -126,6 +126,17 @@ def get_quote(account_id: int, symbol: str) -> dict[str, Any] | None:
         return None
     return data if isinstance(data, dict) else None
 
+
+def list_quote_symbols(account_id: int) -> list[str]:
+    client = redis_client()
+    prefix = f"mt5:quote:{account_id}:"
+    symbols: set[str] = set()
+    for key in client.scan_iter(match=f"{prefix}*"):
+        symbol = str(key).removeprefix(prefix).strip().upper()
+        if symbol:
+            symbols.add(symbol)
+    return sorted(symbols)
+
 def candles_key(account_id: int, symbol: str, timeframe: str) -> str:
     return f"mt5:candles:{account_id}:{symbol.upper()}:{timeframe.upper()}"
 
@@ -141,3 +152,15 @@ def get_candles(account_id: int, symbol: str, timeframe: str, count: int = 240) 
     if not isinstance(candles, list):
         return []
     return candles[-count:]
+
+
+def list_candle_symbols(account_id: int) -> list[str]:
+    client = redis_client()
+    prefix = f"mt5:candles:{account_id}:"
+    symbols: set[str] = set()
+    for key in client.scan_iter(match=f"{prefix}*"):
+        remainder = str(key).removeprefix(prefix)
+        symbol = remainder.split(":", 1)[0].strip().upper()
+        if symbol:
+            symbols.add(symbol)
+    return sorted(symbols)

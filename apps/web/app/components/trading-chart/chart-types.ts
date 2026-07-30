@@ -230,6 +230,33 @@ export interface ExplanationSummary {
   risk_note: string
 }
 
+export interface ExpertFinding {
+  kind: string
+  label: string
+  direction?: 'bullish' | 'bearish' | 'neutral' | null
+  price?: number | null
+  price_low?: number | null
+  price_high?: number | null
+  score: number
+  importance: 'low' | 'medium' | 'high' | 'critical'
+  rationale: string
+  metadata: Record<string, unknown>
+}
+
+export interface ExpertReport {
+  id: string
+  name: string
+  category: string
+  score: number
+  bias?: 'bullish' | 'bearish' | 'neutral' | null
+  confidence: number
+  summary: string
+  findings: ExpertFinding[]
+  warnings: string[]
+  drawing_ids: string[]
+  metadata: Record<string, unknown>
+}
+
 export interface ChartAnalysisResponse {
   symbol: string
   broker_symbol: string
@@ -240,6 +267,7 @@ export interface ChartAnalysisResponse {
   market_state: MarketState
   indicators: IndicatorSummary
   drawings: ChartDrawing[]
+  experts: ExpertReport[]
   signal: SignalSummary
   explanation: ExplanationSummary
   warnings: string[]

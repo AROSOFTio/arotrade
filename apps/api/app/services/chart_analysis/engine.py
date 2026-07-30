@@ -23,6 +23,7 @@ from .market_structure import (
 from .models import (
     ChartAnalysisResponse,
     ChartCandle,
+    ExpertReport,
     ExplanationSummary,
     IndicatorSummary,
     MarketState,
@@ -31,6 +32,7 @@ from .models import (
 from .patterns import detect_chart_patterns
 from .serializer import analysis_cache_key, deserialize_analysis_json, filter_drawings, serialize_analysis_json
 from .signals import SignalPackage, derive_signal
+from .support_resistance_expert import run_support_resistance_expert
 from .trendlines import detect_trendlines
 from .zones import (
     detect_fair_value_gaps,
@@ -309,9 +311,28 @@ def analyze_chart(
     )
     optional_drawings: list[object] = []
     signal_context_drawings: list[object] = list(base_drawings)
+    expert_reports: list[ExpertReport] = []
+
+    def _support_resistance_result() -> list[object]:
+        report, drawings = run_support_resistance_expert(
+            symbol=symbol,
+            timeframe=timeframe,
+            candles=normalized,
+            structure=structure,
+            created_at=now,
+        )
+        expert_reports.append(report)
+        legacy_zones = detect_support_resistance_zones(
+            symbol=symbol,
+            timeframe=timeframe,
+            candles=normalized,
+            structure=structure,
+            created_at=now,
+        )
+        return [*drawings, *legacy_zones]
 
     detector_groups = [
-        ("support_resistance", lambda: detect_support_resistance_zones(symbol=symbol, timeframe=timeframe, candles=normalized, structure=structure, created_at=now)),
+        ("support_resistance", _support_resistance_result),
         ("supply_demand", lambda: detect_supply_demand_zones(symbol=symbol, timeframe=timeframe, candles=normalized, structure=structure, created_at=now)),
         ("order_blocks", lambda: detect_order_blocks(symbol=symbol, timeframe=timeframe, candles=normalized, structure=structure, created_at=now)),
         ("fvg", lambda: detect_fair_value_gaps(symbol=symbol, timeframe=timeframe, candles=normalized, created_at=now)),
@@ -378,6 +399,7 @@ def analyze_chart(
         market_state=market_state,
         indicators=indicator_summary,
         drawings=drawings,
+        experts=expert_reports,
         signal=signal_package.signal,
         explanation=explanation,
         warnings=warnings,

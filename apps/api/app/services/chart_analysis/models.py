@@ -258,6 +258,37 @@ class SignalSummary(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class ExpertFinding(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str
+    label: str
+    direction: Optional[Literal["bullish", "bearish", "neutral"]] = None
+    price: Optional[float] = None
+    price_low: Optional[float] = None
+    price_high: Optional[float] = None
+    score: int = Field(default=0, ge=0, le=100)
+    importance: Literal["low", "medium", "high", "critical"] = "medium"
+    rationale: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExpertReport(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str
+    category: str
+    score: int = Field(default=0, ge=0, le=100)
+    bias: Optional[Literal["bullish", "bearish", "neutral"]] = None
+    confidence: int = Field(default=0, ge=0, le=100)
+    summary: str = ""
+    findings: list[ExpertFinding] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    drawing_ids: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class ExplanationSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -279,6 +310,7 @@ class ChartAnalysisResponse(BaseModel):
     market_state: MarketState
     indicators: IndicatorSummary
     drawings: list[ChartDrawing] = Field(default_factory=list)
+    experts: list[ExpertReport] = Field(default_factory=list)
     signal: SignalSummary
     explanation: ExplanationSummary
     warnings: list[str] = Field(default_factory=list)

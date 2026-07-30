@@ -43,7 +43,9 @@ def filter_drawings(drawings: Sequence[ChartDrawing], include: set[str] | None) 
     filtered: list[ChartDrawing] = []
     for drawing in drawings:
         category = drawing_category(drawing.type)
-        if category in allowed_categories or drawing.type in allowed_categories:
+        metadata = getattr(drawing, "metadata", {}) or {}
+        expert = str(metadata.get("expert") or "").strip().lower()
+        if category in allowed_categories or drawing.type in allowed_categories or expert in allowed_categories:
             filtered.append(drawing)
     return filtered
 

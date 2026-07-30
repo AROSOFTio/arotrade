@@ -13,7 +13,13 @@ from app.services.chart_analysis import engine as chart_analysis_engine
 from app.services.chart_analysis.models import ChartAnalysisResponse
 from app.services import metaapi_gateway as metaapi, news
 from app.services.execution import ExecutionError, resolve_broker_symbol
-from app.services.mt5_bridge.store import get_account_snapshot, get_candles as get_bridge_candles, get_quote as get_bridge_quote
+from app.services.mt5_bridge.store import (
+    get_account_snapshot,
+    get_candles as get_bridge_candles,
+    get_quote as get_bridge_quote,
+    list_candle_symbols,
+    list_quote_symbols,
+)
 
 from app.services.ai_runtime import AIProviderError, AIProviderNotConfigured, ai_health_details, analyze_json
 
@@ -180,6 +186,7 @@ async def get_market_symbols(
         for item in (snapshot or {}).get("symbols", [])
         if isinstance(item, dict) and (item.get("symbol") or item.get("broker_symbol"))
     })
+    bridge_symbols = sorted(set(snapshot_symbols) | set(list_quote_symbols(account.id)) | set(list_candle_symbols(account.id))) if _is_direct_bridge_account(account) else []
     rows = [
         {
             "canonical_symbol": s.canonical_symbol,
@@ -188,10 +195,10 @@ async def get_market_symbols(
             "category": s.category,
         } for s in symbols
     ]
-    if not rows and snapshot_symbols:
+    if not rows and bridge_symbols:
         rows = [
             {"canonical_symbol": symbol, "broker_symbol": symbol, "display_name": symbol, "category": "mt5"}
-            for symbol in snapshot_symbols
+            for symbol in bridge_symbols
         ]
     return {
         "provider": "direct-mt5" if _is_direct_bridge_account(account) else "metaapi-optional",

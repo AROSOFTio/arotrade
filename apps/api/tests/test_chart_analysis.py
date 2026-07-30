@@ -20,7 +20,9 @@ from app.services.chart_analysis.models import (
     ChartCandle,
     DrawingSource,
     EntryZoneDrawing,
+    ExpertReport,
     ExplanationSummary,
+    HorizontalLineDrawing,
     FibonacciDrawing,
     FibonacciLevel,
     IndicatorSummary,
@@ -34,6 +36,7 @@ from app.services.chart_analysis.models import (
 )
 from app.services.chart_analysis.signals import SignalPackage
 from app.services.chart_analysis.serializer import analysis_cache_key, cache_analysis, get_cached_analysis
+from app.services.chart_analysis.support_resistance_expert import run_support_resistance_expert
 from app.services.chart_analysis.zones import detect_fair_value_gaps, detect_support_resistance_zones
 
 
@@ -156,6 +159,46 @@ class ChartStructureTests(unittest.TestCase):
         touches = sorted(drawing.metadata["touches"] for drawing in support_drawings)
         self.assertEqual(touches, [1, 2])
 
+    def test_support_resistance_expert_builds_key_level_report(self):
+        candles = [
+            _candle(
+                i * 60,
+                open_=100.0 + i * 0.08,
+                high=101.0 + i * 0.08,
+                low=99.0 + i * 0.08,
+                close=100.4 + i * 0.08,
+                volume=100 + i,
+            )
+            for i in range(96)
+        ]
+        structure = _structure(current_price=candles[-1].close, atr_value=1.2)
+        structure.swing_highs = [
+            SwingPoint(index=20, time=candles[20].time, price=candles[20].high, kind="high", strength=1.2, confirmed_at=candles[23].time),
+            SwingPoint(index=55, time=candles[55].time, price=candles[55].high, kind="high", strength=1.4, confirmed_at=candles[58].time),
+        ]
+        structure.swing_lows = [
+            SwingPoint(index=18, time=candles[18].time, price=candles[18].low, kind="low", strength=1.1, confirmed_at=candles[21].time),
+            SwingPoint(index=60, time=candles[60].time, price=candles[60].low, kind="low", strength=1.3, confirmed_at=candles[63].time),
+        ]
+
+        report, drawings = run_support_resistance_expert(
+            symbol="XAUUSD",
+            timeframe="H1",
+            candles=candles,
+            structure=structure,
+            created_at=BASE_TIME + timedelta(days=5),
+        )
+
+        self.assertEqual(report.id, "support_resistance")
+        self.assertGreater(report.score, 0)
+        self.assertTrue(report.findings)
+        self.assertTrue(drawings)
+        kinds = {drawing.metadata["kind"] for drawing in drawings}
+        self.assertIn("previous_daily_high", kinds)
+        self.assertIn("pivot", kinds)
+        self.assertIn("psychological", kinds)
+        self.assertTrue(any(str(kind).startswith("session_") for kind in kinds))
+
     def test_fair_value_gap_becomes_filled_after_full_retrace(self):
         candles = [
             _candle(0, open_=9.8, high=10.0, low=9.5, close=9.9),
@@ -264,6 +307,7 @@ class ChartAnalysisEngineTests(unittest.TestCase):
         )
 
     @patch("app.services.chart_analysis.engine.derive_signal")
+    @patch("app.services.chart_analysis.engine.run_support_resistance_expert")
     @patch("app.services.chart_analysis.engine.detect_support_resistance_zones")
     @patch("app.services.chart_analysis.engine.build_structure_drawings")
     @patch("app.services.chart_analysis.engine.detect_market_structure")
@@ -274,6 +318,7 @@ class ChartAnalysisEngineTests(unittest.TestCase):
         mock_detect_market_structure,
         mock_build_structure_drawings,
         mock_detect_support_resistance_zones,
+        mock_run_support_resistance_expert,
         mock_derive_signal,
     ):
         normalized = [_candle(0, open_=100.0, high=100.5, low=99.5, close=100.0)]
@@ -311,6 +356,24 @@ class ChartAnalysisEngineTests(unittest.TestCase):
                 price_high=99.8,
                 style={},
                 metadata={"touches": 2, "category": "support"},
+            )
+        ]
+        expert_drawings = [
+            HorizontalLineDrawing(
+                id="EURUSD:M15:sr-expert:pivot:100",
+                symbol="EURUSD",
+                timeframe="M15",
+                source=DrawingSource.DETERMINISTIC,
+                confidence=84,
+                label="Daily pivot",
+                enabled=True,
+                created_at=BASE_TIME,
+                time_start=normalized[0].time,
+                time_end=normalized[0].time,
+                price_start=100.0,
+                price_end=100.0,
+                style={},
+                metadata={"expert": "support_resistance", "kind": "pivot"},
             )
         ]
         trade_drawings = [
@@ -353,6 +416,18 @@ class ChartAnalysisEngineTests(unittest.TestCase):
         mock_normalize_candles.return_value = normalized
         mock_detect_market_structure.return_value = structure
         mock_build_structure_drawings.return_value = base_drawings
+        mock_run_support_resistance_expert.return_value = (
+            ExpertReport(
+                id="support_resistance",
+                name="Support & Resistance Expert",
+                category="levels",
+                score=80,
+                confidence=80,
+                summary="Support/resistance test report.",
+                drawing_ids=[expert_drawings[0].id],
+            ),
+            expert_drawings,
+        )
         mock_detect_support_resistance_zones.return_value = support_drawings
         mock_derive_signal.return_value = mock_signal_package
 
@@ -365,7 +440,8 @@ class ChartAnalysisEngineTests(unittest.TestCase):
             generated_at=BASE_TIME + timedelta(minutes=30),
         )
 
-        self.assertEqual([drawing.type for drawing in result.drawings], ["swing_high", "support_zone", "entry_zone", "stop_loss"])
+        self.assertEqual([drawing.type for drawing in result.drawings], ["swing_high", "horizontal_line", "support_zone", "entry_zone", "stop_loss"])
+        self.assertEqual(result.experts[0].id, "support_resistance")
 
     def test_analysis_route_normalizes_timeframe_before_caching(self):
         account = SimpleNamespace(id=7, metaapi_account_id="acct-7")
