@@ -81,7 +81,7 @@ export default function PortfolioPage() {
         eyebrow="Portfolio"
         title="Portfolio analytics"
         description="Track account equity, open MT5 exposure, realized P&L, and execution performance from connected accounts."
-        action={
+        actions={
           <button type="button" onClick={() => void load()} className="btn-secondary px-3 py-2" title="Refresh portfolio" aria-label="Refresh portfolio">
             <RefreshCw size={16} />
           </button>
