@@ -3,8 +3,15 @@ from pathlib import Path
 
 
 class MT5ConnectorContractTests(unittest.TestCase):
+    def _repo_root(self) -> Path:
+        test_file = Path(__file__).resolve()
+        for parent in test_file.parents:
+            if (parent / "mt5").is_dir() and (parent / "apps" / "mt5").is_dir():
+                return parent
+        self.skipTest("repository-level MT5 distributions are not included in this image")
+
     def test_every_connector_distribution_has_identical_code(self):
-        repo_root = Path(__file__).resolve().parents[3]
+        repo_root = self._repo_root()
         files = [
             "AroPilotEA.mq5",
             "config.mqh",
@@ -34,7 +41,7 @@ class MT5ConnectorContractTests(unittest.TestCase):
             )
 
     def test_post_body_preserves_working_mt5_conversion_buffer(self):
-        repo_root = Path(__file__).resolve().parents[3]
+        repo_root = self._repo_root()
         copies = [
             repo_root / "mt5" / "network.mqh",
             repo_root / "apps" / "mt5" / "network.mqh",
@@ -48,7 +55,7 @@ class MT5ConnectorContractTests(unittest.TestCase):
         self.assertNotIn("ArrayResize(data", sources[0])
 
     def test_ea_version_is_market_compatible_in_every_distribution(self):
-        repo_root = Path(__file__).resolve().parents[3]
+        repo_root = self._repo_root()
         copies = [
             repo_root / "mt5" / "AroPilotEA.mq5",
             repo_root / "apps" / "mt5" / "AroPilotEA.mq5",
