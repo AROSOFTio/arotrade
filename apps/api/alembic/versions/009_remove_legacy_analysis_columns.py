@@ -1,6 +1,6 @@
 """Remove legacy analysis media columns.
 
-Revision ID: 009_remove_legacy_analysis_columns
+Revision ID: 009_remove_legacy_media
 Revises: 008_manual_trading_fields
 Create Date: 2026-07-30
 """
@@ -9,7 +9,7 @@ from alembic import op
 from sqlalchemy import inspect
 
 
-revision = "009_remove_legacy_analysis_columns"
+revision = "009_remove_legacy_media"
 down_revision = "008_manual_trading_fields"
 branch_labels = None
 depends_on = None
