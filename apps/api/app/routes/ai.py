@@ -8,6 +8,7 @@ from app.database import get_db
 from app.config import settings
 from app.services import metaapi_gateway as metaapi
 from app.services.analysis_engine import market_snapshot
+from app.services.mt5_bridge.store import get_candles as get_bridge_candles
 from app.services.ai.provider_manager import provider_manager
 from app.services.gemini import (
     GeminiError,
@@ -42,6 +43,22 @@ def _live_market_snapshot(metaapi_account_id: str, symbol: str, timeframe: str) 
         return metaapi.candles_to_prompt_context(candles), market_snapshot(symbol, timeframe, candles)
     except Exception:
         return None, None
+
+def _account_market_snapshot(account: models.BrokerAccount, symbol: str, timeframe: str) -> tuple[str | None, dict | None]:
+    if account.metaapi_account_id:
+        return _live_market_snapshot(account.metaapi_account_id, symbol, timeframe)
+    if account.broker == "direct-mt5":
+        candles = get_bridge_candles(account.id, symbol, timeframe, 240)
+        if not candles:
+            return None, None
+        lines = ["time,open,high,low,close,volume"]
+        for candle in candles[-200:]:
+            lines.append(
+                f"{candle.get('time')},{candle.get('open')},{candle.get('high')},{candle.get('low')},{candle.get('close')},{candle.get('volume', 0)}"
+            )
+        return "\n".join(lines), market_snapshot(symbol, timeframe, candles)
+    return None, None
+
 ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp"}
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
@@ -164,13 +181,13 @@ async def compare_ai_models(
         models.BrokerAccount.user_id == current_user["user_id"],
         models.BrokerAccount.is_active == True,
     ).first()
-    if not account or not account.metaapi_account_id:
+    if not account or (not account.metaapi_account_id and account.broker != "direct-mt5"):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Active broker account connected to MetaApi not found",
+            detail="Active MetaApi account or direct MT5 bridge account not found",
         )
 
-    price_context, deterministic = _live_market_snapshot(account.metaapi_account_id, request.symbol, request.timeframe)
+    price_context, deterministic = _account_market_snapshot(account, request.symbol, request.timeframe)
     comparison = provider_manager.compare(
         symbol=request.symbol,
         timeframe=request.timeframe,
@@ -196,13 +213,13 @@ async def analyze_chart(
         models.BrokerAccount.user_id == current_user["user_id"],
         models.BrokerAccount.is_active == True,
     ).first()
-    if not account or not account.metaapi_account_id:
+    if not account or (not account.metaapi_account_id and account.broker != "direct-mt5"):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Active broker account connected to MetaApi not found"
+            detail="Active MetaApi account or direct MT5 bridge account not found"
         )
 
-    price_context, deterministic = _live_market_snapshot(account.metaapi_account_id, request.symbol, request.timeframe)
+    price_context, deterministic = _account_market_snapshot(account, request.symbol, request.timeframe)
     result = _run_or_raise(
         symbol=request.symbol,
         timeframe=request.timeframe,
@@ -255,13 +272,13 @@ async def analyze_image_upload(
         models.BrokerAccount.user_id == current_user["user_id"],
         models.BrokerAccount.is_active == True,
     ).first()
-    if not account or not account.metaapi_account_id:
+    if not account or (not account.metaapi_account_id and account.broker != "direct-mt5"):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Active broker account connected to MetaApi not found"
+            detail="Active MetaApi account or direct MT5 bridge account not found"
         )
 
-    price_context, deterministic = _live_market_snapshot(account.metaapi_account_id, symbol, timeframe)
+    price_context, deterministic = _account_market_snapshot(account, symbol, timeframe)
     result = _run_or_raise(
         symbol=symbol,
         timeframe=timeframe,

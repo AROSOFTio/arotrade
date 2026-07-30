@@ -124,7 +124,7 @@ export default function AIAnalysisPage() {
     setAccountsLoading(true)
     apiRequest<BrokerAccount[]>('/broker-accounts')
       .then((r) => {
-        const active = r.filter((a) => a.is_active && a.connection_state === 'deployed')
+        const active = r.filter((a) => a.is_active && (a.connection_state === 'deployed' || a.connection_state === 'direct_connected'))
         setAccounts(active)
         if (active.length > 0) {
           const saved = localStorage.getItem('arotrade:selected_account_id')
@@ -214,7 +214,7 @@ export default function AIAnalysisPage() {
         <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-6 text-center">
           <Landmark size={32} className="mx-auto text-blue-500" />
           <h2 className="mt-3 text-sm font-semibold text-slate-900">No active broker accounts connected</h2>
-          <p className="mt-1 text-xs text-slate-500">Connect and deploy an active MT5 account to run AI market analysis.</p>
+          <p className="mt-1 text-xs text-slate-500">Connect a deployed MetaApi account or a direct MT5 bridge account to run AI market analysis.</p>
           <div className="mt-4"><a href="/dashboard/broker-accounts" className="btn-primary px-4 py-1.5 text-xs font-semibold">Connect Account</a></div>
         </div>
       </>

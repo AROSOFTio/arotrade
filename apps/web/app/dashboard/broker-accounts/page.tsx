@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { Landmark, Link2, Power, RefreshCw, Rocket, Square } from 'lucide-react'
+import { Copy, Download, Landmark, Link2, PlugZap, Power, RefreshCw, Rocket, Square } from 'lucide-react'
 
 import { apiRequest, errorMessage, formatDate, formatNumber } from '../../components/api'
 import { EmptyState } from '../../components/empty-state'
@@ -25,9 +25,11 @@ type BrokerAccount = {
 }
 
 const initialForm = { name: '', login: '', password: '', server: '', platform: 'mt5', account_type: 'demo' }
+const initialDirectForm = { name: 'Local MT5 terminal', login: '', server: '', account_type: 'demo' }
 
 function stateTone(state?: string | null) {
-  if (state === 'deployed') return 'bg-[#f0fdf4] text-[#15803d]'
+  if (state === 'deployed' || state === 'direct_connected') return 'bg-[#f0fdf4] text-[#15803d]'
+  if (state === 'waiting_for_ea') return 'bg-blue-50 text-[#1d4ed8]'
   if (state === 'deploying' || state === 'undeploying') return 'bg-amber-50 text-amber-700'
   return 'bg-slate-100 text-slate-600'
 }
@@ -35,6 +37,10 @@ function stateTone(state?: string | null) {
 export default function BrokerAccountsPage() {
   const [accounts, setAccounts] = useState<BrokerAccount[]>([])
   const [form, setForm] = useState(initialForm)
+  const [directForm, setDirectForm] = useState(initialDirectForm)
+  const [bridgeKey, setBridgeKey] = useState('')
+  const [bridgeAccountId, setBridgeAccountId] = useState<number | null>(null)
+  const [bridgeEndpoint, setBridgeEndpoint] = useState('https://arotrader.arosoftlabs.com/api/mt5/bridge')
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [busyId, setBusyId] = useState<number | null>(null)
@@ -81,6 +87,24 @@ export default function BrokerAccountsPage() {
     } catch (requestError) { setError(errorMessage(requestError)) } finally { setSubmitting(false) }
   }
 
+  const createDirectBridge = async (event: React.FormEvent) => {
+    event.preventDefault()
+    setError('')
+    setMessage('')
+    setBridgeKey('')
+    setSubmitting(true)
+    try {
+      const response = await apiRequest<{ account: BrokerAccount; api_key: string; endpoint: string }>('/broker-accounts/direct-mt5', {
+        method: 'POST',
+        body: JSON.stringify(directForm),
+      })
+      setAccounts((current) => [response.account, ...current])
+      setBridgeKey(response.api_key)
+      setBridgeAccountId(response.account.id)
+      setBridgeEndpoint(response.endpoint)
+      setMessage('Direct MT5 bridge created. Paste the endpoint, account id and bridge key into the MT5 Expert Advisor.')
+    } catch (requestError) { setError(errorMessage(requestError)) } finally { setSubmitting(false) }
+  }
   const accountAction = async (accountId: number, action: 'deploy' | 'undeploy' | 'state' | 'deactivate') => {
     setError('')
     setMessage('')
@@ -104,7 +128,51 @@ export default function BrokerAccountsPage() {
       />
       {(error || message) && <div className={`mb-5 rounded-md border px-4 py-3 text-sm ${error ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>{error || message}</div>}
       <section className="grid gap-6 xl:grid-cols-[minmax(340px,0.7fr)_minmax(0,1.3fr)]">
-        <form onSubmit={connectMt5} className="card h-fit">
+        <div className="space-y-6">
+          <form onSubmit={createDirectBridge} className="card h-fit">
+            <div className="flex items-center gap-2">
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50 text-[#16a34a]"><PlugZap size={18} aria-hidden="true" /></span>
+              <div>
+                <h2 className="text-sm font-semibold text-slate-900">Direct MT5 bridge</h2>
+                <p className="mt-0.5 text-xs text-slate-500">Use an Expert Advisor in your MetaTrader terminal. No MetaApi top-up required.</p>
+              </div>
+            </div>
+            <div className="mt-5 grid grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="direct-name" className="label">Bridge name</label>
+                <input id="direct-name" className="input-base" value={directForm.name} onChange={(e) => setDirectForm((c) => ({ ...c, name: e.target.value }))} required />
+              </div>
+              <div>
+                <label htmlFor="direct-type" className="label">Account type</label>
+                <select id="direct-type" className="input-base" value={directForm.account_type} onChange={(e) => setDirectForm((c) => ({ ...c, account_type: e.target.value }))}>
+                  <option value="demo">Demo</option>
+                  <option value="live">Live</option>
+                </select>
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="direct-login" className="label">MT5 login</label>
+                <input id="direct-login" className="input-base" value={directForm.login} onChange={(e) => setDirectForm((c) => ({ ...c, login: e.target.value.replace(/\D/g, '') }))} placeholder="134478618" />
+              </div>
+              <div>
+                <label htmlFor="direct-server" className="label">Broker server</label>
+                <input id="direct-server" className="input-base" value={directForm.server} onChange={(e) => setDirectForm((c) => ({ ...c, server: e.target.value }))} placeholder="Exness-MT5Real9" />
+              </div>
+            </div>
+            <button type="submit" disabled={submitting} className="btn-primary mt-5 w-full">{submitting ? 'Creating...' : 'Create direct MT5 bridge'}</button>
+            <a href="/mt5/AroPilotMT5Connector.zip" download className="mt-3 flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"><Download size={15} /> Download MT5 connector</a>
+            {bridgeKey && <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+              <div className="font-bold">EA inputs</div>
+              <div className="mt-2 space-y-1 font-mono break-all">
+                <div>BridgeUrl={bridgeEndpoint}</div>
+                <div>AccountId={bridgeAccountId}</div>
+                <div>ApiKey={bridgeKey}</div>
+              </div>
+              <button type="button" className="mt-3 inline-flex items-center gap-2 text-xs font-bold text-emerald-800" onClick={() => void navigator.clipboard?.writeText(`BridgeUrl=${bridgeEndpoint}\nAccountId=${bridgeAccountId}\nApiKey=${bridgeKey}`)}><Copy size={13} /> Copy inputs</button>
+            </div>}
+          </form>
+          <form onSubmit={connectMt5} className="card h-fit">
           <div className="flex items-center gap-2">
             <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-[#2563eb]"><Link2 size={18} aria-hidden="true" /></span>
             <div>
@@ -150,6 +218,7 @@ export default function BrokerAccountsPage() {
           </div>
           <button type="submit" disabled={submitting} className="btn-primary mt-5 w-full">{submitting ? 'Connecting…' : 'Connect account'}</button>
         </form>
+        </div>
 
         <div className="card overflow-hidden p-0">
           <div className="border-b border-slate-200 px-5 py-4">
@@ -168,7 +237,9 @@ export default function BrokerAccountsPage() {
                     <p className="mt-1 text-xs text-slate-500">Added {formatDate(account.created_at)}</p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    {account.metaapi_account_id ? (
+                    {account.broker === 'direct-mt5' ? (
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${stateTone(account.connection_state)}`}>{account.connection_state || 'waiting_for_ea'}</span>
+                    ) : account.metaapi_account_id ? (
                       <>
                         <span className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${stateTone(account.connection_state)}`}>{account.connection_state || 'unknown'}</span>
                         {account.connection_state === 'deployed' || account.connection_state === 'deploying' ? (

@@ -1,3 +1,4 @@
+import secrets
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -89,6 +90,66 @@ async def list_broker_accounts(
 
     return accounts
 
+
+
+@router.post("/direct-mt5", status_code=status.HTTP_201_CREATED)
+async def create_direct_mt5_bridge(
+    payload: dict,
+    current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create a direct MT5 bridge account and one-time EA API key.
+
+    This does not call MetaApi and does not store the MT5 trading password. The
+    returned api_key is shown once and should be pasted into the MT5 EA inputs.
+    """
+    name = str(payload.get("name") or "Direct MT5 bridge").strip()[:100]
+    login = str(payload.get("login") or "pending").strip()[:255]
+    server = str(payload.get("server") or "local-terminal").strip()[:100]
+    account_type = str(payload.get("account_type") or "demo").lower()
+    if account_type not in {"demo", "live"}:
+        account_type = "demo"
+
+    account = models.BrokerAccount(
+        user_id=current_user["user_id"],
+        broker="direct-mt5",
+        account_id=login,
+        account_type=models.TradingMode.LIVE if account_type == "live" else models.TradingMode.DEMO,
+        balance=0,
+        currency="USD",
+        is_active=True,
+        name=name,
+        server=server,
+        platform="mt5",
+        connection_state="waiting_for_ea",
+    )
+    db.add(account)
+    db.flush()
+
+    raw_key = "arot_" + secrets.token_urlsafe(32)
+    api_key = models.APIKey(
+        user_id=current_user["user_id"],
+        key=raw_key,
+        name=f"MT5 Bridge - {name}",
+        is_active=True,
+    )
+    db.add(api_key)
+    create_notification(
+        db,
+        current_user["user_id"],
+        title="Direct MT5 bridge created",
+        body="Install the AroPilotEA in MetaTrader 5 and paste the generated bridge key.",
+        category="system",
+        link="/dashboard/broker-accounts",
+    )
+    db.commit()
+    db.refresh(account)
+    return {
+        "account": schemas.BrokerAccountResponse.model_validate(account).model_dump(mode="json"),
+        "api_key": raw_key,
+        "endpoint": "https://arotrader.arosoftlabs.com/api/mt5/bridge",
+        "ea_file": "/mt5/AroPilotEA.mq5",
+    }
 
 @router.post("", response_model=schemas.BrokerAccountResponse, status_code=status.HTTP_201_CREATED)
 async def add_demo_broker_account(
