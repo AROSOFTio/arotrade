@@ -7,7 +7,11 @@ bool HttpPostJson(string url, string apiKey, string payload, string &response)
    char result[];
    string resultHeaders = "";
    string headers = "Content-Type: application/json\r\nX-AroPilot-Key: " + apiKey + "\r\n";
-   StringToCharArray(payload, data, 0, WHOLE_ARRAY, CP_UTF8);
+   int bytes = StringToCharArray(payload, data, 0, WHOLE_ARRAY, CP_UTF8);
+   // StringToCharArray includes its terminating NUL. WebRequest sends the
+   // complete array, so remove that byte to keep the HTTP body valid JSON.
+   if(bytes > 0 && data[bytes - 1] == 0)
+      ArrayResize(data, bytes - 1);
    ResetLastError();
    int code = WebRequest("POST", url, headers, 15000, data, result, resultHeaders);
    response = CharArrayToString(result, 0, -1, CP_UTF8);
