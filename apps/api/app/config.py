@@ -47,11 +47,19 @@ class Settings(BaseSettings):
     RATE_LIMIT_PER_MINUTE: int = 100
 
     # AI Providers
-    # Comma-separated provider preference. Supported: xai, openai, anthropic/claude, gemini.
-    AI_PROVIDER_ORDER: str = "xai,openai,anthropic,gemini"
+    # Free/local providers are first by default. Supported: ollama, lmstudio,
+    # gemini, openrouter, openai, claude, deepseek, qwen, grok.
+    AI_PROVIDER_ORDER: str = "ollama,lmstudio,gemini,openrouter,openai,claude,deepseek,qwen,grok"
+    OLLAMA_BASE_URL: str = ""
+    OLLAMA_MODEL: str = "llama3.1"
+    LMSTUDIO_BASE_URL: str = ""
+    LMSTUDIO_MODEL: str = "local-model"
     XAI_API_KEY: str = ""
     XAI_MODEL: str = "grok-4.5"
     XAI_BASE_URL: str = "https://api.x.ai/v1"
+    GROK_API_KEY: str = ""
+    GROK_MODEL: str = "grok-4.5"
+    GROK_BASE_URL: str = "https://api.x.ai/v1"
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4.1"
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
@@ -59,8 +67,21 @@ class Settings(BaseSettings):
     ANTHROPIC_MODEL: str = "claude-3-5-sonnet-latest"
     ANTHROPIC_BASE_URL: str = "https://api.anthropic.com/v1"
     ANTHROPIC_VERSION: str = "2023-06-01"
+    CLAUDE_API_KEY: str = ""
+    CLAUDE_MODEL: str = "claude-3-5-sonnet-latest"
+    CLAUDE_BASE_URL: str = "https://api.anthropic.com/v1"
+    CLAUDE_VERSION: str = "2023-06-01"
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-3.5-flash"
+    DEEPSEEK_API_KEY: str = ""
+    DEEPSEEK_MODEL: str = "deepseek-chat"
+    DEEPSEEK_BASE_URL: str = "https://api.deepseek.com/v1"
+    QWEN_API_KEY: str = ""
+    QWEN_MODEL: str = "qwen-plus"
+    QWEN_BASE_URL: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    OPENROUTER_API_KEY: str = ""
+    OPENROUTER_MODEL: str = "meta-llama/llama-3.1-8b-instruct:free"
+    OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
 
     # Trading
     DERIV_APP_ID: str = ""

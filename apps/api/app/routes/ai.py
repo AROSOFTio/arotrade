@@ -7,6 +7,8 @@ from app import models, schemas
 from app.database import get_db
 from app.config import settings
 from app.services import metaapi_gateway as metaapi
+from app.services.analysis_engine import market_snapshot
+from app.services.ai.provider_manager import provider_manager
 from app.services.gemini import (
     GeminiError,
     GeminiNotConfigured,
@@ -29,6 +31,17 @@ def _live_context(metaapi_account_id: str, symbol: str, timeframe: str) -> str |
     except Exception:
         return None
 
+
+def _live_market_snapshot(metaapi_account_id: str, symbol: str, timeframe: str) -> tuple[str | None, dict | None]:
+    """Return shared candle text and deterministic indicators for AI interpretation."""
+    try:
+        tf = metaapi.normalize_timeframe(timeframe)
+        candles = metaapi.get_candles(metaapi_account_id, symbol, tf, 240)
+        if not candles:
+            return None, None
+        return metaapi.candles_to_prompt_context(candles), market_snapshot(symbol, timeframe, candles)
+    except Exception:
+        return None, None
 ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp"}
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
@@ -130,6 +143,47 @@ def _run_or_raise(**kwargs) -> dict:
         )
 
 
+@router.get("/providers")
+async def list_ai_providers(
+    current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
+):
+    """Return all supported providers with graceful availability labels."""
+    del current_user
+    return {"providers": [status.__dict__ for status in provider_manager.all_statuses()]}
+
+
+@router.post("/compare")
+async def compare_ai_models(
+    request: schemas.AIAnalysisRequest,
+    current_user: dict = Depends(__import__('app.auth', fromlist=['get_current_user']).get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Analyze one MT5 market snapshot with every provider and expose consensus/disagreement."""
+    account = db.query(models.BrokerAccount).filter(
+        models.BrokerAccount.id == request.broker_account_id,
+        models.BrokerAccount.user_id == current_user["user_id"],
+        models.BrokerAccount.is_active == True,
+    ).first()
+    if not account or not account.metaapi_account_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Active broker account connected to MetaApi not found",
+        )
+
+    price_context, deterministic = _live_market_snapshot(account.metaapi_account_id, request.symbol, request.timeframe)
+    comparison = provider_manager.compare(
+        symbol=request.symbol,
+        timeframe=request.timeframe,
+        prompt=request.prompt,
+        image_bytes=None,
+        image_mime=None,
+        price_context=price_context,
+        deterministic_analysis=deterministic,
+    )
+    comparison["market"] = {"symbol": request.symbol.upper(), "timeframe": request.timeframe}
+    comparison["deterministic_analysis"] = deterministic
+    return comparison
+
 @router.post("/analyze", response_model=schemas.AIAnalysisResponse)
 async def analyze_chart(
     request: schemas.AIAnalysisRequest,
@@ -148,11 +202,13 @@ async def analyze_chart(
             detail="Active broker account connected to MetaApi not found"
         )
 
+    price_context, deterministic = _live_market_snapshot(account.metaapi_account_id, request.symbol, request.timeframe)
     result = _run_or_raise(
         symbol=request.symbol,
         timeframe=request.timeframe,
         prompt=request.prompt,
-        price_context=_live_context(account.metaapi_account_id, request.symbol, request.timeframe),
+        price_context=price_context,
+        deterministic_analysis=deterministic,
     )
     return _persist_analysis(
         db,
@@ -205,13 +261,15 @@ async def analyze_image_upload(
             detail="Active broker account connected to MetaApi not found"
         )
 
+    price_context, deterministic = _live_market_snapshot(account.metaapi_account_id, symbol, timeframe)
     result = _run_or_raise(
         symbol=symbol,
         timeframe=timeframe,
         prompt=prompt or None,
         image_bytes=image_bytes,
         image_mime=file.content_type,
-        price_context=_live_context(account.metaapi_account_id, symbol, timeframe),
+        price_context=price_context,
+        deterministic_analysis=deterministic,
     )
     return _persist_analysis(
         db,
